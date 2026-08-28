@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Quiz Calles Valencia — Parques Bomberos</title>
+<title>Quiz Valencia 2500</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -715,7 +715,7 @@
 <!-- USER SELECT SCREEN -->
 <div id="user-select-screen">
   <div class="user-select-inner">
-    <div class="user-select-title">Quiz <span>Calles</span> VLC</div>
+    <div class="user-select-title">Quiz <span>Valencia</span> 2500</div>
     <div class="user-select-sub">¿Quién eres?</div>
     <div class="user-buttons">
       <button class="user-btn" data-user="Josep">Josep</button>
@@ -726,7 +726,7 @@
 
 <div id="app" style="display:none;">
 <header>
-  <h1>Quiz <span>Calles</span> VLC</h1>
+  <h1>Quiz <span>Valencia</span> 2500</h1>
   <div class="header-right">
     <div class="motivational" id="motivational-phrase"></div>
     <button class="switch-user-btn" id="switch-user-btn"></button>
@@ -1550,12 +1550,6 @@ function renderQuestion() {
   document.getElementById('mapa-fix-input').value = '';
 
   const rec = getRecord(e.calle);
-  if (!rec.revisada) {
-    rec.revisada = true;
-    rec.firstSeen = new Date().toISOString();
-  }
-  rec.lastSeen = new Date().toISOString();
-  saveRecord(e.calle, rec);
 
   // Nota
   const textarea = document.getElementById('nota-textarea');
@@ -1645,6 +1639,15 @@ function checkAnswer() {
     selP.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
     selA.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
   }
+
+  // La calle solo cuenta como revisada cuando el usuario envía una respuesta
+  // válida pulsando “Comprobar”; verla o pasarla no aumenta el progreso.
+  const checkedAt = new Date().toISOString();
+  if (!rec.revisada) {
+    rec.revisada = true;
+    rec.firstSeen = checkedAt;
+  }
+  rec.lastSeen = checkedAt;
 
   // Save nota on answer
   rec.nota = document.getElementById('nota-textarea').value;
