@@ -1230,10 +1230,11 @@ function parseCoord(text) {
   if (!text) return null;
   text = text.trim();
   let lat, lon;
-  const m = text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)
+  // En enlaces de lugares, !3d/!4d señalan el pin; @ solo centra la vista.
+  const m = text.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)
+        || text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)
         || text.match(/[?&]ll=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/i)
-        || text.match(/[?&]q=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/i)
-        || text.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+        || text.match(/[?&]q=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/i);
   if (m) { lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
   else {
     const nums = text.match(/-?\d+\.\d+/g);
