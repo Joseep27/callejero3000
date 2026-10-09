@@ -1511,6 +1511,7 @@ let qIndex = 0;
 let answered = false;
 let sessionOk = 0;
 let sessionFail = 0;
+let pendingStartCount = 0;
 
 function isFailedRec(r) {
   return !!(r && r.pendingFail);
@@ -1567,6 +1568,7 @@ function startQuiz(zone) {
   renderMastery();
   document.getElementById('plan-review-badge').classList.toggle('show', !!activePlanReviewGroup);
   const entries = getFilteredEntries(zone);
+  pendingStartCount = zone === 'pendientes' ? entries.length : 0;
   if (!entries.length) {
     document.getElementById('quiz-card').style.display = 'none';
     document.getElementById('completed-card').classList.remove('show');
@@ -1687,15 +1689,27 @@ function renderQuestion() {
   }
 
   // Progress
-  document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}`;
+  if (currentZone === 'pendientes') updatePendingProgress();
+  else document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}`;
   document.getElementById('btn-back').disabled = qIndex === 0;
-  document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
+  if (currentZone !== 'pendientes') {
+    document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
+  }
 
   document.getElementById('btn-check').textContent = 'Comprobar';
   document.getElementById('btn-check').disabled = false;
   document.getElementById('feedback-bar').classList.remove('show');
 
   updateHeaderStats();
+}
+
+function updatePendingProgress() {
+  const { learned, total } = computeMastery('todas');
+  const remaining = total - learned;
+  document.getElementById('progress-label').textContent = `Quedan ${remaining} sin revisar`;
+  document.getElementById('progress-fill').style.width = pendingStartCount
+    ? `${Math.max(0, Math.min(100, ((pendingStartCount - remaining) / pendingStartCount) * 100))}%`
+    : '100%';
 }
 
 function checkAnswer() {
@@ -1792,6 +1806,10 @@ function checkAnswer() {
   updateAprendidaBtn(rec);
   updateHeaderStats();
   renderMastery();
+  if (currentZone === 'pendientes') {
+    updatePendingProgress();
+    document.getElementById('btn-back').disabled = true;
+  }
 }
 
 function showFeedback(ok, e) {
@@ -1841,7 +1859,11 @@ function nextQuestion() {
     rec.nota = document.getElementById('nota-textarea').value;
     saveRecord(e.calle, rec);
   }
-  qIndex++;
+  if (currentZone === 'pendientes' && answered) {
+    queue.splice(qIndex, 1);
+  } else {
+    qIndex++;
+  }
   document.getElementById('feedback-bar').classList.remove('show');
   renderQuestion();
 }
@@ -1850,8 +1872,9 @@ function showCompleted() {
   document.getElementById('quiz-card').style.display = 'none';
   const c = document.getElementById('completed-card');
   c.classList.add('show');
-  document.getElementById('completed-sub').textContent =
-    `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
+  document.getElementById('completed-sub').textContent = currentZone === 'pendientes'
+    ? `${sessionOk} acertadas · ${sessionFail} falladas · ${getFilteredEntries('pendientes').length} pendientes por revisar`
+    : `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
   if (activePlanReviewGroup) {
     document.getElementById('completed-sub').textContent += ' · Repaso registrado';
     activePlanReviewGroup = null;
@@ -2447,7 +2470,7 @@ document.getElementById('btn-check').addEventListener('click', () => {
 });
 
 document.getElementById('btn-back').addEventListener('click', () => {
-  if (qIndex === 0) return;
+  if (qIndex === 0 || (currentZone === 'pendientes' && answered)) return;
   // save nota of current before going back
   if (qIndex < queue.length) {
     const e = queue[qIndex];
@@ -2462,17 +2485,7 @@ document.getElementById('btn-back').addEventListener('click', () => {
 });
 
 document.getElementById('btn-next').addEventListener('click', () => {
-  if (!answered) {
-    // skip: count as no answer, just advance
-    const e = queue[qIndex];
-    const rec = getRecord(e.calle);
-    rec.nota = document.getElementById('nota-textarea').value;
-    saveRecord(e.calle, rec);
-  }
-  qIndex++;
-  answered = false;
-  document.getElementById('feedback-bar').classList.remove('show');
-  renderQuestion();
+  nextQuestion();
 });
 
 document.getElementById('btn-restart').addEventListener('click', () => {
