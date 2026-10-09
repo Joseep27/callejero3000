@@ -293,6 +293,7 @@
   .tab[data-zone="oeste"].active { border-color: var(--oeste); color: var(--oeste); }
   .tab[data-zone="campanar"].active { border-color: var(--campanar); color: var(--campanar); }
   .tab[data-zone="saler"].active { border-color: var(--saler); color: var(--saler); }
+  .tab[data-zone="pendientes"].active { border-color: #fbbf24; color: #fbbf24; }
   .tab[data-zone="repaso"].active { border-color: #c084fc; color: #c084fc; }
   .tab[data-zone="plan"].active { border-color: var(--campanar); color: var(--campanar); }
 
@@ -765,6 +766,7 @@
   <div class="tab" data-zone="oeste">Oeste<span class="tab-pct" id="pct-oeste"></span></div>
   <div class="tab" data-zone="campanar">Campanar<span class="tab-pct" id="pct-campanar"></span></div>
   <div class="tab" data-zone="saler">Saler<span class="tab-pct" id="pct-saler"></span></div>
+  <div class="tab" data-zone="pendientes">Pendientes<span class="tab-pct" id="count-pendientes"></span></div>
   <div class="tab" data-zone="repaso">★ Repaso</div>
   <div class="tab" data-zone="plan" id="tab-plan" style="display:none;">🗓 Plan</div>
   <div class="tab" data-zone="stats">📊 Stats</div>
@@ -1520,6 +1522,9 @@ function getFilteredEntries(zone) {
     if (activePlanReviewGroup === '__due__') return dueEntries();
     return list;
   }
+  if (zone === 'pendientes') {
+    return activeEntries().filter(e => !getRecord(e.calle).revisada);
+  }
   if (zone === 'repaso') {
     return activeEntries().filter(e => isFailedRec(store[e.calle]));
   }
@@ -1566,7 +1571,9 @@ function startQuiz(zone) {
     document.getElementById('quiz-card').style.display = 'none';
     document.getElementById('completed-card').classList.remove('show');
     const grupoTxt = '';
-    const msg = zone === 'repaso'
+    const msg = zone === 'pendientes'
+      ? '¡Ya has revisado todas las calles al menos una vez!'
+      : zone === 'repaso'
       ? (grupoTxt
           ? `No hay calles falladas${grupoTxt} (aún).<br>¡Sigue practicando ese grupo!`
           : 'No hay calles falladas aún.<br>Practica primero en otra pestaña.')
@@ -1611,7 +1618,7 @@ function renderQuestion() {
   document.getElementById('completed-card').classList.remove('show');
   const card = document.getElementById('quiz-card');
   // reset color classes (oculto en 'todas' para no delatar el parque por el color)
-  const hideColor = (currentZone === 'todas' || currentZone === 'repaso');
+  const hideColor = (currentZone === 'todas' || currentZone === 'pendientes' || currentZone === 'repaso');
   card.className = 'quiz-card ' + (hideColor ? 'zone-hidden' : 'zone-' + e.zone.toLowerCase());
 
   document.getElementById('calle-nombre').innerHTML =
@@ -1666,7 +1673,7 @@ function renderQuestion() {
   selP.className = 'parque-select';
   selA.className = 'parque-select';
 
-  if (currentZone !== 'todas' && currentZone !== 'repaso') {
+  if (currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso') {
     // solo apoyo
     row.className = 'respuesta-row single';
     selP.parentElement.style.display = 'none';
@@ -1698,7 +1705,7 @@ function checkAnswer() {
   const rec = getRecord(e.calle);
   const selP = document.getElementById('sel-primero');
   const selA = document.getElementById('sel-apoyo');
-  const isZoneMode = currentZone !== 'todas' && currentZone !== 'repaso';
+  const isZoneMode = currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso';
 
   let correct = false;
   let respuestaConcreta = '';
@@ -1793,7 +1800,7 @@ function showFeedback(ok, e) {
   document.getElementById('feedback-icon').textContent = ok ? '✓' : '✗';
   document.getElementById('feedback-text').textContent = ok ? '¡Correcto!' : 'Incorrecto';
   if (!ok) {
-    const isZoneMode = currentZone !== 'todas' && currentZone !== 'repaso';
+    const isZoneMode = currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso';
     // Solo las combinaciones reales (donde el 1º parque es el de origen de la calle).
     const real = e.salidas.filter(s => s[0] === e.zone);
 
@@ -1873,6 +1880,7 @@ function computeMastery(zone) {
 
 function renderMastery() {
   const g = computeMastery('todas');
+  const pending = Math.max(0, g.total - g.learned);
   document.getElementById('mastery-global-pct').textContent = g.pct + '%';
   document.getElementById('mastery-global-count').textContent = `(${g.learned}/${g.total})`;
   document.getElementById('mastery-global-fill').style.width = g.pct + '%';
@@ -1882,6 +1890,7 @@ function renderMastery() {
     const el = document.getElementById('pct-' + z);
     if (el) el.textContent = ` ${m.pct}%`;
   });
+  document.getElementById('count-pendientes').textContent = ` ${pending}`;
 }
 
 function updateAprendidaBtn(rec) {
