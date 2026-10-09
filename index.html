@@ -597,6 +597,18 @@
   }
   .parque-select:focus { outline: none; border-color: var(--muted); }
   .parque-select::placeholder { color: var(--muted); font-size: 14px; font-weight: 400; }
+  .parque-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+  .parque-option {
+    min-height: 44px; padding: 7px 4px; border: 2px solid var(--border); border-radius: 8px;
+    background: var(--surface2); color: var(--text); cursor: pointer;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700;
+  }
+  .parque-option:hover, .parque-option:focus-visible { border-color: var(--muted); outline: none; }
+  .parque-option.selected { border-color: var(--text); background: rgba(255,255,255,0.12); }
+  .parque-option.selected.correct { border-color: var(--correct); background: rgba(16,179,110,0.18); }
+  .parque-option.selected.wrong { border-color: var(--wrong); background: rgba(232,66,10,0.18); }
+  .parque-option:disabled { cursor: default; }
+  .parque-options.missing { outline: 2px solid var(--wrong); outline-offset: 3px; border-radius: 8px; }
 
   /* estado correcto/incorrecto */
   .parque-select.correct { border-color: var(--correct) !important; background-color: rgba(16,179,110,0.08); }
@@ -868,11 +880,25 @@
         <div class="respuesta-row" id="respuesta-row">
           <div class="input-group">
             <label>1ª Salida</label>
-            <input type="text" class="parque-select" id="sel-primero" placeholder="Norte / Central / Oeste / Campanar / Saler" autocomplete="off">
+            <div class="parque-options" data-target="sel-primero" role="group" aria-label="Elegir 1ª salida">
+              <button type="button" class="parque-option" data-parque="Norte" aria-pressed="false">Norte</button>
+              <button type="button" class="parque-option" data-parque="Central" aria-pressed="false">Central</button>
+              <button type="button" class="parque-option" data-parque="Oeste" aria-pressed="false">Oeste</button>
+              <button type="button" class="parque-option" data-parque="Campanar" aria-pressed="false">Campanar</button>
+              <button type="button" class="parque-option" data-parque="Saler" aria-pressed="false">Saler</button>
+            </div>
+            <input type="text" class="parque-select" id="sel-primero" aria-label="O escribir 1ª salida" placeholder="O escribe el parque" autocomplete="off">
           </div>
           <div class="input-group" id="grupo-apoyo">
-            <label>Parque de Apoyo</label>
-            <input type="text" class="parque-select" id="sel-apoyo" placeholder="Norte / Central / Oeste / Campanar / Saler" autocomplete="off">
+            <label>2ª Salida (apoyo)</label>
+            <div class="parque-options" data-target="sel-apoyo" role="group" aria-label="Elegir 2ª salida o apoyo">
+              <button type="button" class="parque-option" data-parque="Norte" aria-pressed="false">Norte</button>
+              <button type="button" class="parque-option" data-parque="Central" aria-pressed="false">Central</button>
+              <button type="button" class="parque-option" data-parque="Oeste" aria-pressed="false">Oeste</button>
+              <button type="button" class="parque-option" data-parque="Campanar" aria-pressed="false">Campanar</button>
+              <button type="button" class="parque-option" data-parque="Saler" aria-pressed="false">Saler</button>
+            </div>
+            <input type="text" class="parque-select" id="sel-apoyo" aria-label="O escribir 2ª salida o apoyo" placeholder="O escribe el parque" autocomplete="off">
           </div>
         </div>
       </div>
@@ -1606,6 +1632,28 @@ function updateNoteFlag() {
   document.getElementById('nota-toggle').classList.toggle('has-note', has);
 }
 
+function syncParkOptions(input) {
+  const group = document.querySelector(`.parque-options[data-target="${input.id}"]`);
+  const value = input.value.trim().toLowerCase();
+  group.querySelectorAll('.parque-option').forEach(button => {
+    const selected = button.dataset.parque.toLowerCase() === value;
+    button.classList.toggle('selected', selected);
+    button.classList.toggle('correct', selected && input.classList.contains('correct'));
+    button.classList.toggle('wrong', selected && input.classList.contains('wrong'));
+    button.setAttribute('aria-pressed', String(selected));
+  });
+}
+
+function markMissingPark(input) {
+  input.style.borderColor = 'var(--wrong)';
+  document.querySelector(`.parque-options[data-target="${input.id}"]`).classList.add('missing');
+}
+
+function markParkAnswer(input, correct) {
+  input.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
+  syncParkOptions(input);
+}
+
 function renderQuestion() {
   if (qIndex >= queue.length) {
     showCompleted();
@@ -1674,18 +1722,26 @@ function renderQuestion() {
   selA.value = '';
   selP.className = 'parque-select';
   selA.className = 'parque-select';
+  selP.style.borderColor = '';
+  selA.style.borderColor = '';
+  selP.disabled = false;
+  selA.disabled = false;
+  document.querySelectorAll('.parque-options').forEach(group => group.classList.remove('missing'));
+  document.querySelectorAll('.parque-option').forEach(button => { button.disabled = false; });
+  syncParkOptions(selP);
+  syncParkOptions(selA);
 
   if (currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso') {
     // solo apoyo
     row.className = 'respuesta-row single';
     selP.parentElement.style.display = 'none';
     grupoApoyo.style.display = 'block';
-    selA.parentElement.querySelector('label').textContent = 'Parque de Apoyo';
+    selA.parentElement.querySelector('label').textContent = '2ª Salida (apoyo)';
   } else {
     row.className = 'respuesta-row';
     selP.parentElement.style.display = 'block';
     grupoApoyo.style.display = 'block';
-    selA.parentElement.querySelector('label').textContent = 'Parque de Apoyo';
+    selA.parentElement.querySelector('label').textContent = '2ª Salida (apoyo)';
   }
 
   // Progress
@@ -1736,23 +1792,23 @@ function checkAnswer() {
 
   if (isZoneMode) {
     const apoyo = selA.value;
-    if (!apoyo.trim()) { selA.style.borderColor = 'var(--wrong)'; return; }
+    if (!apoyo.trim()) { markMissingPark(selA); return; }
     const validApoyos = new Set(real.map(s => s[1].toLowerCase()));
     correct = validApoyos.has(normalize(apoyo));
     respuestaConcreta = `${e.zone} → ${apoyo.trim()}`;
-    selA.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
+    markParkAnswer(selA, correct);
   } else {
     const p1 = selP.value;
     const p2 = selA.value;
-    if (!p1.trim()) { selP.style.borderColor = 'var(--wrong)'; return; }
-    if (!p2.trim()) { selA.style.borderColor = 'var(--wrong)'; return; }
+    if (!p1.trim()) { markMissingPark(selP); return; }
+    if (!p2.trim()) { markMissingPark(selA); return; }
     correct = real.some(s =>
       s[0].toLowerCase() === normalize(p1) &&
       s[1].toLowerCase() === normalize(p2)
     );
     respuestaConcreta = `${p1.trim()} → ${p2.trim()}`;
-    selP.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
-    selA.className = 'parque-select ' + (correct ? 'correct' : 'wrong');
+    markParkAnswer(selP, correct);
+    markParkAnswer(selA, correct);
   }
 
   // La calle solo cuenta como revisada cuando el usuario envía una respuesta
@@ -1802,6 +1858,9 @@ function checkAnswer() {
 
   saveRecord(e.calle, rec);
   answered = true;
+  selP.disabled = true;
+  selA.disabled = true;
+  document.querySelectorAll('.parque-option').forEach(button => { button.disabled = true; });
   document.getElementById('btn-check').textContent = 'Siguiente →';
   updateAprendidaBtn(rec);
   updateHeaderStats();
@@ -2306,6 +2365,28 @@ function importData(text) {
 // ============================================================
 // EVENTS
 // ============================================================
+document.getElementById('respuesta-row').addEventListener('click', event => {
+  const button = event.target.closest('.parque-option');
+  if (!button || answered) return;
+  const group = button.closest('.parque-options');
+  const input = document.getElementById(group.dataset.target);
+  input.value = button.dataset.parque;
+  input.className = 'parque-select';
+  input.style.borderColor = '';
+  group.classList.remove('missing');
+  syncParkOptions(input);
+});
+
+['sel-primero', 'sel-apoyo'].forEach(id => {
+  const input = document.getElementById(id);
+  input.addEventListener('input', () => {
+    input.className = 'parque-select';
+    input.style.borderColor = '';
+    document.querySelector(`.parque-options[data-target="${id}"]`).classList.remove('missing');
+    syncParkOptions(input);
+  });
+});
+
 document.getElementById('tabs').addEventListener('click', e => {
   const tab = e.target.closest('.tab');
   if (!tab) return;
