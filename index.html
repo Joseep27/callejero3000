@@ -958,7 +958,7 @@
 
     <div class="completed-card" id="completed-card">
       <div class="completed-icon">🏁</div>
-      <div class="completed-title">¡Ronda completada!</div>
+      <div class="completed-title" id="completed-title">¡Ronda completada!</div>
       <div class="completed-sub" id="completed-sub"></div>
       <button class="btn btn-primary" id="btn-restart" style="max-width:200px;margin:0 auto;">Volver a empezar</button>
     </div>
@@ -1529,6 +1529,7 @@ function saveRecord(calle, rec) {
 let currentZone = 'todas';
 let onlyFailed = false;
 let queue = [];
+let activeRound = null;
 let activePlanReviewGroup = null;
 let answerMode = 'buttons';
 function answerModeKey() { return 'quiz_valencia_2500_v1_ANSWER_MODE_' + CURRENT_USER; }
@@ -1569,30 +1570,38 @@ function scheduleTheme(grupo, startedOn = todayISO()) {
   if (!grupo || grupo === 'todas') return;
   const plan = loadPlan();
   if (!plan[grupo]) {
-    plan[grupo] = { startedOn, stage: 0, due: planDue(startedOn, 0), done: false };
+    plan[grupo] = { startedOn, stage: 0, due: planDue(startedOn, 0), done: false, completedRound: true };
     savePlan(plan);
   }
   renderStudyPlan();
 }
 
-// Recupera solo las temáticas practicadas en este repo, sin fechas ajenas.
-// El antiguo STREET_PLAN se conserva en localStorage como respaldo.
+// Corrige una sola vez el antiguo alta con una única respuesta. Conserva una
+// copia recuperable y las fechas de los temas realmente completados.
 function bootstrapExistingThemes() {
+  const migrationKey = planKey() + '_FULL_ROUND_V1';
+  if (localStorage.getItem(migrationKey)) return;
   const plan = loadPlan();
-  let changed = false;
+  const confirmed = CURRENT_USER === 'Josep' ? ['Puentes', 'Países / Regiones'] : [];
+  // Estas dos vueltas han sido confirmadas expresamente por el usuario.
+  const corrected = {};
   GRUPOS.forEach(g => {
-    const practiced = studyEntries().some(e => {
+    const streets = uniqueStreetEntries(studyEntries().filter(e => e.grupo === g));
+    const completed = streets.length > 0 && streets.every(e => {
       const r = store[recordStreetKey(e.calle)];
       const x = r && r.porGrupo && r.porGrupo[g];
       return x && ((x.ok || 0) + (x.fail || 0) > 0);
     });
-    if (practiced && !plan[g]) {
+    if (completed || plan[g]?.completedRound || confirmed.includes(g)) {
       const t = todayISO();
-      plan[g] = { startedOn:t, stage:0, due:planDue(t, 0), done:false };
-      changed = true;
+      corrected[g] = { ...(plan[g] || { startedOn:t, stage:0, due:planDue(t, 0), done:false }), completedRound:true };
     }
   });
-  if (changed) savePlan(plan);
+  try {
+    localStorage.setItem(migrationKey + '_BACKUP', JSON.stringify(plan));
+    localStorage.setItem(planKey(), JSON.stringify(corrected));
+    localStorage.setItem(migrationKey, todayISO());
+  } catch { console.warn('No se ha podido corregir el plan; se conserva su copia anterior.'); }
 }
 
 function finishPlanReview(grupo) {
@@ -1745,6 +1754,83 @@ function shuffle(arr) {
   return a;
 }
 
+// Rondas de estudio persistentes. Repaso y "Solo falladas" conservan su cola
+// de refuerzo. El progreso, las notas y el calendario se guardan por separado.
+function roundScopeKey() {
+  if (currentZone === 'repaso' || onlyFailed) return null;
+  const scope = activePlanReviewGroup
+    ? ['plan', activePlanReviewGroup, loadPlan()[activePlanReviewGroup]?.startedOn || '', loadPlan()[activePlanReviewGroup]?.stage ?? 0]
+    : [currentZone, getGrupoSel(currentZone)];
+  return 'quiz_valencia_2500_v1_ROUND_' + CURRENT_USER + '_' + JSON.stringify(scope);
+}
+function roundStreetId(entry) { return entry.origCalle || entry.calle; }
+function saveRound(state) {
+  try { localStorage.setItem(state.key, JSON.stringify(state)); }
+  catch { console.warn('No se ha podido guardar la ronda de estudio.'); }
+}
+function reconcileRound(entries, key) {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(key)); } catch {}
+  const available = new Set(entries.map(roundStreetId));
+  const order = [], included = new Set();
+  for (const id of (Array.isArray(saved?.order) ? saved.order : [])) {
+    if (available.has(id) && !included.has(id)) { order.push(id); included.add(id); }
+  }
+  for (const e of shuffle(entries.filter(e => !included.has(roundStreetId(e))))) {
+    const id = roundStreetId(e);
+    if (!included.has(id)) { order.push(id); included.add(id); }
+  }
+  const seen = [...new Set((Array.isArray(saved?.seen) ? saved.seen : []).filter(id => available.has(id)))];
+  const retry = [...new Set((Array.isArray(saved?.retry) ? saved.retry : []).filter(id => available.has(id)))];
+  const state = { version:2, key, cycle:Number.isInteger(saved?.cycle) && saved.cycle > 0 ? saved.cycle : 1, order, seen, retry };
+  saveRound(state);
+  return state;
+}
+function persistentRoundEntries(entries, key) {
+  const byId = new Map(entries.map(e => [roundStreetId(e), e]));
+  activeRound = reconcileRound(entries, key);
+  if (activeRound.order.length && activeRound.seen.length === activeRound.order.length && !activeRound.retry.length) {
+    activeRound.cycle++;
+    activeRound.seen = [];
+    activeRound.order = shuffle([...byId.keys()]);
+    saveRound(activeRound);
+  }
+  const seen = new Set(activeRound.seen);
+  const pendingRetries = new Set(activeRound.retry);
+  const remaining = activeRound.order.filter(id => !seen.has(id) && !pendingRetries.has(id)).map(id => byId.get(id));
+  activeRound.retry.forEach((id, i) => {
+    remaining.splice(Math.min(remaining.length, 3 + i * 4), 0, byId.get(id));
+  });
+  return remaining;
+}
+function markRoundAnswered(entry, correct = true) {
+  if (!activeRound || activeRound.key !== roundScopeKey()) return;
+  const id = roundStreetId(entry);
+  if (activeRound.order.includes(id)) {
+    if (!activeRound.seen.includes(id)) activeRound.seen.push(id);
+    activeRound.retry = activeRound.retry.filter(x => x !== id);
+    if (!correct) activeRound.retry.push(id);
+    saveRound(activeRound);
+    updateQuestionProgress();
+  }
+}
+
+function updateQuestionProgress() {
+  document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}` +
+    (activeRound ? ` · Vuelta ${activeRound.cycle}: ${activeRound.seen.length}/${activeRound.order.length} respondidas` +
+      (activeRound.retry.length ? ` · ${activeRound.retry.length} fallo(s) por acertar` : '') : '');
+}
+
+function updateRetryQueue(entry, correct) {
+  // Evita acumular copias si se vuelve atrás o se modifica una respuesta.
+  const id = roundStreetId(entry);
+  queue = queue.filter((e, index) => index <= qIndex || roundStreetId(e) !== id);
+  if (!correct) {
+    const distance = 3 + Math.floor(Math.random() * 2);
+    queue.splice(Math.min(queue.length, qIndex + distance + 1), 0, entry);
+  }
+}
+
 function startQuiz(zone) {
   currentZone = zone;
   updateGrupoFilterUI(zone);
@@ -1752,6 +1838,8 @@ function startQuiz(zone) {
   renderMastery();
   document.getElementById('plan-review-badge').classList.toggle('show', !!activePlanReviewGroup);
   const entries = getFilteredEntries(zone);
+  const roundKey = roundScopeKey();
+  activeRound = null;
   if (!entries.length) {
     document.getElementById('quiz-card').style.display = 'none';
     document.getElementById('completed-card').classList.remove('show');
@@ -1771,7 +1859,7 @@ function startQuiz(zone) {
     return;
   }
   document.getElementById('empty-state-card').style.display = 'none';
-  queue = shuffle(entries);
+  queue = roundKey ? persistentRoundEntries(entries, roundKey) : shuffle(entries);
   qIndex = 0;
   answered = false;
   sessionOk = 0;
@@ -1901,7 +1989,7 @@ function renderQuestion() {
   updateAnswerModeUI();
 
   // Progress
-  document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}`;
+  updateQuestionProgress();
   document.getElementById('btn-back').disabled = qIndex === 0;
   document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
 
@@ -1983,11 +2071,6 @@ function checkAnswer() {
     rec.pendingFailEntry = ovKey(e);
     sessionFail++;
     showFeedback(false, e);
-    if (currentZone !== 'todas') {
-      const distance = 3 + Math.floor(Math.random() * 2);
-      const insertAt = Math.min(queue.length, qIndex + distance + 1);
-      queue.splice(insertAt, 0, e);
-    }
   }
 
   // Historial por temática: solo suma aquí si estamos estudiando con un
@@ -2006,6 +2089,9 @@ function checkAnswer() {
   }
 
   saveRecord(e.calle, rec);
+  updateRetryQueue(e, correct);
+  markRoundAnswered(e, correct);
+  updateQuestionProgress();
   answered = true;
   selP.disabled = true;
   selA.disabled = true;
@@ -2070,18 +2156,34 @@ function nextQuestion() {
 }
 
 function showCompleted() {
+  let fullRoundCompleted = false;
   document.getElementById('quiz-card').style.display = 'none';
   const c = document.getElementById('completed-card');
   c.classList.add('show');
+  document.getElementById('completed-title').textContent = '¡Ronda completada!';
+  document.getElementById('btn-restart').textContent = 'Volver a empezar';
   document.getElementById('completed-sub').textContent = `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
-  if (activePlanReviewGroup) {
+  if (activeRound && activeRound.key === roundScopeKey()) {
+    activeRound = reconcileRound(getFilteredEntries(currentZone), activeRound.key);
+    const unseen = activeRound.order.filter(id => !activeRound.seen.includes(id));
+    const remaining = new Set([...unseen, ...activeRound.retry]).size;
+    if (remaining) {
+      document.getElementById('completed-title').textContent = 'Ronda pendiente';
+      document.getElementById('completed-sub').textContent += ` · ${unseen.length} sin responder · ${activeRound.retry.length} fallo(s) por acertar. La vuelta sigue guardada.`;
+      document.getElementById('btn-restart').textContent = 'Continuar pendientes';
+      return;
+    }
+    fullRoundCompleted = activeRound.order.length > 0;
+  }
+  activeRound = null;
+  if (activePlanReviewGroup && fullRoundCompleted) {
     finishPlanReview(activePlanReviewGroup);
     document.getElementById('completed-sub').textContent += ' · Repaso registrado';
     activePlanReviewGroup = null;
     renderStudyPlan();
   } else {
     const grupo = grupoFiltroActivo();
-    if (CURRENT_USER === 'Josep' && currentZone === 'todas' && grupo && grupo !== '__sin_asignar__') scheduleTheme(grupo);
+    if (fullRoundCompleted && CURRENT_USER === 'Josep' && currentZone === 'todas' && grupo && grupo !== '__sin_asignar__') scheduleTheme(grupo);
   }
 }
 
