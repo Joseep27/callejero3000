@@ -754,7 +754,6 @@
   .answer-mode-switch { display:flex; justify-content:center; gap:8px; margin-bottom:14px; }
   .answer-mode-btn { border:1px solid var(--border); background:var(--surface2); color:var(--muted); border-radius:999px; padding:6px 14px; cursor:pointer; font:inherit; }
   .answer-mode-btn.active { border-color:var(--text); background:var(--text); color:var(--bg); }
-  #no-asignadas-area { overflow-x:auto; }
 </style>
 </head>
 <body>
@@ -787,7 +786,6 @@
   <div class="tab" data-zone="oeste">Oeste<span class="tab-pct" id="pct-oeste"></span></div>
   <div class="tab" data-zone="campanar">Campanar<span class="tab-pct" id="pct-campanar"></span></div>
   <div class="tab" data-zone="saler">Saler<span class="tab-pct" id="pct-saler"></span></div>
-  <div class="tab" data-zone="no-asignadas">No asignadas<span class="tab-pct" id="count-no-asignadas"></span></div>
   <div class="tab" data-zone="repaso">★ Repaso</div>
   <div class="tab" data-zone="plan" id="tab-plan" style="display:none;">🗓 Plan</div>
   <div class="tab" data-zone="stats">📊 Stats</div>
@@ -814,7 +812,6 @@
 </section>
 
 <main id="main-content">
-  <section id="no-asignadas-area" style="display:none" aria-label="Calles pendientes de asignación"></section>
 
   <!-- PROGRESO -->
   <div id="quiz-area">
@@ -1177,15 +1174,6 @@ function uniqueStreetEntries(entries) {
   }
   return [...streets.values()];
 }
-function renderUnassigned() {
-  const list = activeEntries().filter(needsAssignment);
-  document.getElementById('no-asignadas-area').innerHTML = `<h2>No asignadas (${list.length})</h2>
-    <p>Calles apartadas del estudio hasta completar o revisar sus parques.</p>
-    <table class="stats-table"><thead><tr><th>Calle</th><th>Asignación actual</th><th>Por revisar</th></tr></thead><tbody>${list.map(e =>
-      `<tr><td>${escPlan(e.calle)}</td><td>${escPlan(e.salidas.map(s => s.join(' → ')).join(' / ') || 'Incompleta')}</td><td>${escPlan(e.incomplete ? 'Faltan parques' : 'Propuesta Excel: ' + PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)])}</td></tr>`
-    ).join('')}</tbody></table>`;
-}
-
 function applyOverrides() {
   // Reset a original
   ALL_ENTRIES.forEach(e => {
@@ -1555,10 +1543,10 @@ function updateAnswerModeUI() {
 }
 
 // ============================================================
-// CALENDARIO DE REPASO POR CALLE (+1, +3, +7, +14, +30 días)
+// CALENDARIO DE REPASO POR TEMÁTICAS (+1, +3, +7, +10 días)
 // ============================================================
-const PLAN_INTERVALS = [1, 3, 7, 14, 30];
-function planKey() { return 'quiz_valencia_2500_v1_STREET_PLAN_' + CURRENT_USER; }
+const PLAN_INTERVALS = [1, 3, 7, 10];
+function planKey() { return 'quiz_valencia_2500_v1_PLAN_' + CURRENT_USER; }
 function todayISO() {
   const d = new Date();
   const p = n => String(n).padStart(2, '0');
@@ -1574,69 +1562,92 @@ function loadPlan() { try { return JSON.parse(localStorage.getItem(planKey())) |
 function savePlan(plan) { try { localStorage.setItem(planKey(), JSON.stringify(plan)); } catch {} }
 function escPlan(v) { return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function planOffset(stage) {
-  return stage < PLAN_INTERVALS.length ? PLAN_INTERVALS[stage] : 30;
+  return stage < PLAN_INTERVALS.length ? PLAN_INTERVALS[stage] : 10 + (stage - 3) * 10;
 }
-function scheduleStreet(calle, from = todayISO()) {
-  if (!calle) return;
-  calle = recordStreetKey(calle);
+function planDue(startedOn, stage) { return addDaysISO(startedOn, planOffset(stage)); }
+function scheduleTheme(grupo, startedOn = todayISO()) {
+  if (!grupo || grupo === 'todas') return;
   const plan = loadPlan();
-  if (!plan[calle]) {
-    plan[calle] = { stage: 0, due: addDaysISO(from, PLAN_INTERVALS[0]), lastDone: from };
+  if (!plan[grupo]) {
+    plan[grupo] = { startedOn, stage: 0, due: planDue(startedOn, 0), done: false };
     savePlan(plan);
   }
+  renderStudyPlan();
 }
-function bootstrapExistingReviews() {
+
+// Recupera solo las temáticas practicadas en este repo, sin fechas ajenas.
+// El antiguo STREET_PLAN se conserva en localStorage como respaldo.
+function bootstrapExistingThemes() {
   const plan = loadPlan();
   let changed = false;
-  activeEntries().forEach(e => {
-    const key = recordStreetKey(e.calle), r = store[key];
-    if (r && ((r.ok || 0) + (r.fail || 0) > 0) && !plan[key]) {
-      plan[key] = { stage:0, due:addDaysISO(todayISO(), 1), lastDone:todayISO(), imported:true };
+  GRUPOS.forEach(g => {
+    const practiced = studyEntries().some(e => {
+      const r = store[recordStreetKey(e.calle)];
+      const x = r && r.porGrupo && r.porGrupo[g];
+      return x && ((x.ok || 0) + (x.fail || 0) > 0);
+    });
+    if (practiced && !plan[g]) {
+      const t = todayISO();
+      plan[g] = { startedOn:t, stage:0, due:planDue(t, 0), done:false };
       changed = true;
     }
   });
   if (changed) savePlan(plan);
 }
-function recordPlanAttempt(calle, correct) {
-  calle = recordStreetKey(calle);
-  const plan = loadPlan();
-  const item = plan[calle] || { stage:0 };
-  item.stage = correct ? Math.min((item.stage || 0) + 1, PLAN_INTERVALS.length - 1) : 0;
+
+function finishPlanReview(grupo) {
+  const plan = loadPlan(); const item = plan[grupo];
+  if (!item) return;
+  item.stage++;
   item.lastDone = todayISO();
-  item.due = addDaysISO(todayISO(), planOffset(item.stage));
-  plan[calle] = item;
+  // Si había varios repasos atrasados, una sesión pone el calendario al día:
+  // saltamos fechas ya vencidas y programamos la siguiente fecha futura.
+  while (planDue(item.startedOn, item.stage) <= todayISO()) item.stage++;
+  item.done = false;
+  item.due = planDue(item.startedOn, item.stage);
   savePlan(plan);
 }
-function dueEntries() {
-  const plan = loadPlan(), now = todayISO();
-  return uniqueStreetEntries(studyEntries()).filter(e => plan[recordStreetKey(e.calle)] && plan[recordStreetKey(e.calle)].due <= now)
-    .sort((a,b) => plan[recordStreetKey(a.calle)].due.localeCompare(plan[recordStreetKey(b.calle)].due) || a.calle.localeCompare(b.calle,'es'));
+
+function postponeTheme(grupo) {
+  const plan = loadPlan(), item = plan[grupo];
+  if (!item) return;
+  item.due = addDaysISO(todayISO(), 1);
+  item.postponedOn = todayISO();
+  savePlan(plan);
+  renderStudyPlan();
 }
+
 function renderStudyPlan() {
   if (!CURRENT_USER) return;
-  const now = todayISO(), plan = loadPlan(), due = dueEntries();
+  const now = todayISO(); const plan = loadPlan();
+  const due = Object.entries(plan).filter(([,x]) => !x.done && x.due <= now)
+    .sort((a,b) => a[1].due.localeCompare(b[1].due));
   document.getElementById('plan-date').textContent = new Date().toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' });
   document.getElementById('plan-count').textContent = due.length ? `${due.length} pendiente${due.length === 1 ? '' : 's'}` : 'Al día';
   const host = document.getElementById('plan-list');
   if (!due.length) {
-    host.innerHTML = '<div class="plan-empty">✅ No tienes calles programadas para hoy. Cada calle contestada se incorporará automáticamente al calendario.</div>';
+    host.innerHTML = '<div class="plan-empty">✅ No tienes repasos programados para hoy. Puedes elegir una o dos temáticas nuevas.</div>';
   } else {
-    host.innerHTML = `<div style="display:flex;gap:8px;margin-bottom:10px"><button class="plan-start" data-plan-start-all="1">Empezar las ${due.length}</button><button class="plan-postpone" data-plan-postpone-all="1">Mañana</button></div>` + due.slice(0,100).map(e => {
-      const x = plan[recordStreetKey(e.calle)], overdue = x.due < now;
-      const label = overdue ? `Atrasada desde ${x.due.split('-').reverse().join('/')}` : `Hoy · nivel +${planOffset(x.stage)} días`;
+    host.innerHTML = due.map(([g,x]) => {
+      const overdue = x.due < now;
+      const count = uniqueStreetEntries(studyEntries().filter(e => e.grupo === g)).length;
+      const label = overdue ? `Atrasado desde ${x.due.split('-').reverse().slice(0,2).join('/')}` : `Repaso +${planOffset(x.stage)} días`;
       return `<div class="plan-item ${overdue ? 'overdue' : ''}">
-        <div class="plan-item-info"><div class="plan-item-name">${escPlan(e.calle)}</div><div class="plan-item-meta">${label}</div></div>
+        <div class="plan-item-info"><div class="plan-item-name">${escPlan(g)}</div><div class="plan-item-meta">${label} · ${count} calles</div></div>
+        <button class="plan-start" data-plan-start="${escPlan(g)}">Empezar</button>
+        <button class="plan-postpone" data-plan-postpone="${escPlan(g)}">Mañana</button>
       </div>`;
-    }).join('') + (due.length > 100 ? `<div class="plan-empty">Y ${due.length-100} calles más…</div>` : '');
+    }).join('');
   }
-  const upcoming = Object.entries(plan).filter(([,x]) => x.due > now).sort((a,b) => a[1].due.localeCompare(b[1].due))[0];
-  const scheduled = Object.keys(plan).length;
+  const upcoming = Object.entries(plan).filter(([,x]) => !x.done && x.due > now).sort((a,b) => a[1].due.localeCompare(b[1].due))[0];
+  const scheduled = Object.values(plan).filter(x => !x.done).length;
   document.getElementById('plan-next').textContent = upcoming
-    ? `Próxima: ${upcoming[0]} · ${upcoming[1].due.split('-').reverse().join('/')} · En calendario: ${scheduled}`
-    : (scheduled ? `Calles en calendario: ${scheduled}` : 'Todavía no hay calles estudiadas en el calendario.');
+    ? `Próximo: ${upcoming[0]} · ${upcoming[1].due.split('-').reverse().join('/')}  ·  En calendario: ${scheduled}`
+    : (scheduled ? `Temáticas en calendario: ${scheduled}` : 'Completa una ronda temática para incorporarla automáticamente al calendario.');
 }
-function startPlanReview() {
-  activePlanReviewGroup = '__due__';
+
+function startPlanReview(grupo) {
+  activePlanReviewGroup = grupo;
   onlyFailed = false;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.zone === 'todas'));
   document.getElementById('quiz-area').style.display = 'block';
@@ -1678,7 +1689,7 @@ function updateGrupoWarning(zone) {
   const thematicZone = ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
   const zoneName = thematicZone ? capZone(zone) : '';
   const count = thematicZone ? studyEntries().filter(e => (['todas', 'repaso'].includes(zone) || e.zone === zoneName) && !e.grupo).length : 0;
-  const show = thematicZone && count > 0;
+  const show = thematicZone && count > 0 && !activePlanReviewGroup;
   warning.classList.toggle('show', show);
   document.getElementById('grupo-warning-text').textContent =
     `⚠ ${count} calles de ${zoneName} no tienen temática. Revisa el mapa y asígnales temática y parques desde “Modificar”.`;
@@ -1686,7 +1697,7 @@ function updateGrupoWarning(zone) {
 
 function updateGrupoFilterUI(zone) {
   const wrap = document.getElementById('grupo-filter');
-  const show = ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
+  const show = !activePlanReviewGroup && ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
   wrap.classList.toggle('show', show);
   if (show) populateGrupoSelect(zone);
   updateGrupoWarning(zone);
@@ -1703,7 +1714,7 @@ function isFailedRec(r) {
 }
 
 function getFilteredEntries(zone) {
-  if (activePlanReviewGroup === '__due__') return dueEntries();
+  if (activePlanReviewGroup) return uniqueStreetEntries(studyEntries().filter(e => e.grupo === activePlanReviewGroup));
   let list = studyEntries();
   if (!['todas', 'repaso'].includes(zone)) list = entriesForPark(list, capZone(zone));
   const grupo = getGrupoSel(zone);
@@ -1820,8 +1831,8 @@ function renderQuestion() {
   const grupoEl = document.getElementById('calle-grupo');
   const translation = e.translation && e.translation !== e.calle ? e.translation : '';
   const details = [];
-  if (e.grupo) details.push(`Temática: ${e.grupo}`);
-  else details.push('⚠ Sin temática: revisa el mapa y usa “Modificar”');
+  if (e.grupo && !activePlanReviewGroup) details.push(`Temática: ${e.grupo}`);
+  else if (!e.grupo) details.push('⚠ Sin temática: revisa el mapa y usa “Modificar”');
   if (e.incomplete) details.push('⚠ Faltan parques');
   const parkReviewProposal = PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)];
   const needsParkReview = !!parkReviewProposal && !e.modified;
@@ -1994,9 +2005,6 @@ function checkAnswer() {
     rec.aprendida = rec.streak >= 5;
   }
 
-  if (activePlanReviewGroup === '__due__') recordPlanAttempt(e.calle, correct);
-  else scheduleStreet(e.calle);
-
   saveRecord(e.calle, rec);
   answered = true;
   selP.disabled = true;
@@ -2067,9 +2075,13 @@ function showCompleted() {
   c.classList.add('show');
   document.getElementById('completed-sub').textContent = `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
   if (activePlanReviewGroup) {
+    finishPlanReview(activePlanReviewGroup);
     document.getElementById('completed-sub').textContent += ' · Repaso registrado';
     activePlanReviewGroup = null;
     renderStudyPlan();
+  } else {
+    const grupo = grupoFiltroActivo();
+    if (CURRENT_USER === 'Josep' && currentZone === 'todas' && grupo && grupo !== '__sin_asignar__') scheduleTheme(grupo);
   }
 }
 
@@ -2104,7 +2116,6 @@ function renderMastery() {
     const el = document.getElementById('pct-' + z);
     if (el) el.textContent = ` ${m.pct}%`;
   });
-  document.getElementById('count-no-asignadas').textContent = ` ${activeEntries().filter(needsAssignment).length}`;
 }
 
 function updateAprendidaBtn(rec) {
@@ -2437,13 +2448,14 @@ function exportData() {
       nota_usuario: rec.nota || '',
       primera_revision: rec.firstSeen || '',
       ultima_revision: rec.lastSeen || '',
-      nivel_plan: plan[recordStreetKey(e.calle)]?.stage ?? '',
-      proximo_repaso: plan[recordStreetKey(e.calle)]?.due || '',
+      nivel_plan: plan[e.grupo]?.stage ?? '',
+      proximo_repaso: plan[e.grupo]?.due || '',
       modificada: !!e.modified
     };
   });
   const payload = {
-    version: 5,
+    version: 6,
+    planType: 'themes',
     calles,
     progress: store,
     plan,
@@ -2509,10 +2521,11 @@ function importData(text) {
     store = merged;
     saveStorage(store);
   }
-  if (data.plan && typeof data.plan === 'object') {
+  if (data.planType === 'themes' && data.plan && typeof data.plan === 'object') {
     const mergedPlan = loadPlan();
-    Object.entries(data.plan).forEach(([calle, incoming]) => {
-      if (!mergedPlan[calle] || String(incoming.lastDone || '') >= String(mergedPlan[calle].lastDone || '')) mergedPlan[calle] = incoming;
+    Object.entries(data.plan).forEach(([grupo, incoming]) => {
+      if (!GRUPOS.includes(grupo) || !incoming || !/^\d{4}-\d{2}-\d{2}$/.test(incoming.startedOn || '') || !/^\d{4}-\d{2}-\d{2}$/.test(incoming.due || '') || !Number.isInteger(incoming.stage) || incoming.stage < 0) return;
+      if (!mergedPlan[grupo] || String(incoming.lastDone || '') >= String(mergedPlan[grupo].lastDone || '')) mergedPlan[grupo] = incoming;
     });
     savePlan(mergedPlan);
   }
@@ -2578,16 +2591,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   const statsArea = document.getElementById('stats-area');
   const histArea = document.getElementById('historial-area');
   const planArea = document.getElementById('study-plan');
-  const unassignedArea = document.getElementById('no-asignadas-area');
-  unassignedArea.style.display = zone === 'no-asignadas' ? 'block' : 'none';
-
-  if (zone === 'no-asignadas') {
-    quizArea.style.display = 'none';
-    statsArea.style.display = 'none';
-    histArea.style.display = 'none';
-    planArea.style.display = 'none';
-    renderUnassigned();
-  } else if (zone === 'plan') {
+  if (zone === 'plan') {
     quizArea.style.display = 'none';
     statsArea.style.display = 'none';
     histArea.style.display = 'none';
@@ -2635,13 +2639,10 @@ populateGrupoSelect('norte');
 
 // Acciones del Plan de hoy
 document.getElementById('plan-list').addEventListener('click', e => {
-  if (e.target.closest('[data-plan-start-all]')) { startPlanReview(); return; }
-  if (e.target.closest('[data-plan-postpone-all]')) {
-    const plan = loadPlan();
-    dueEntries().forEach(entry => { const key = recordStreetKey(entry.calle); plan[key].due = addDaysISO(todayISO(), 1); plan[key].postponedOn = todayISO(); });
-    savePlan(plan);
-    renderStudyPlan();
-  }
+  const start = e.target.closest('[data-plan-start]');
+  if (start) { startPlanReview(start.dataset.planStart); return; }
+  const postpone = e.target.closest('[data-plan-postpone]');
+  if (postpone) postponeTheme(postpone.dataset.planPostpone);
 });
 
 // Modificar
@@ -2859,7 +2860,6 @@ function enterApp(user) {
   store = loadStorage();
   resetLegacyReviewOnce();
   try { answerMode = localStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }
-  document.getElementById('no-asignadas-area').style.display = 'none';
   document.getElementById('quiz-area').style.display = 'block';
   document.getElementById('stats-area').style.display = 'none';
   document.getElementById('historial-area').style.display = 'none';
@@ -2872,7 +2872,7 @@ function enterApp(user) {
   document.getElementById('tab-plan').style.display = usesPlan ? '' : 'none';
   document.getElementById('study-plan').style.display = 'none';
   if (usesPlan) {
-    bootstrapExistingReviews();
+    bootstrapExistingThemes();
     renderStudyPlan();
   }
   renderMastery();
