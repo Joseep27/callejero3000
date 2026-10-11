@@ -293,7 +293,6 @@
   .tab[data-zone="oeste"].active { border-color: var(--oeste); color: var(--oeste); }
   .tab[data-zone="campanar"].active { border-color: var(--campanar); color: var(--campanar); }
   .tab[data-zone="saler"].active { border-color: var(--saler); color: var(--saler); }
-  .tab[data-zone="pendientes"].active { border-color: #fbbf24; color: #fbbf24; }
   .tab[data-zone="repaso"].active { border-color: #c084fc; color: #c084fc; }
   .tab[data-zone="plan"].active { border-color: var(--campanar); color: var(--campanar); }
 
@@ -746,6 +745,10 @@
     .respuesta-row { grid-template-columns: 1fr; }
     main { padding: 20px 16px; }
   }
+  .answer-mode-switch { display:flex; justify-content:center; gap:8px; margin-bottom:14px; }
+  .answer-mode-btn { border:1px solid var(--border); background:var(--surface2); color:var(--muted); border-radius:999px; padding:6px 14px; cursor:pointer; font:inherit; }
+  .answer-mode-btn.active { border-color:var(--text); background:var(--text); color:var(--bg); }
+  #no-asignadas-area { overflow-x:auto; }
 </style>
 </head>
 <body>
@@ -778,7 +781,7 @@
   <div class="tab" data-zone="oeste">Oeste<span class="tab-pct" id="pct-oeste"></span></div>
   <div class="tab" data-zone="campanar">Campanar<span class="tab-pct" id="pct-campanar"></span></div>
   <div class="tab" data-zone="saler">Saler<span class="tab-pct" id="pct-saler"></span></div>
-  <div class="tab" data-zone="pendientes">Pendientes<span class="tab-pct" id="count-pendientes"></span></div>
+  <div class="tab" data-zone="no-asignadas">No asignadas<span class="tab-pct" id="count-no-asignadas"></span></div>
   <div class="tab" data-zone="repaso">★ Repaso</div>
   <div class="tab" data-zone="plan" id="tab-plan" style="display:none;">🗓 Plan</div>
   <div class="tab" data-zone="stats">📊 Stats</div>
@@ -787,7 +790,7 @@
 
 <div class="mastery-global">
   <div class="mastery-global-label">
-    <span>Calles revisadas al menos una vez</span>
+    <span>Calles aprendidas · 5 aciertos seguidos</span>
     <span><b id="mastery-global-pct">0%</b> <span id="mastery-global-count" style="color:var(--muted)">(0/0)</span></span>
   </div>
   <div class="mastery-global-bar"><div class="mastery-global-fill" id="mastery-global-fill" style="width:0%"></div></div>
@@ -805,6 +808,7 @@
 </section>
 
 <main id="main-content">
+  <section id="no-asignadas-area" style="display:none" aria-label="Calles pendientes de asignación"></section>
 
   <!-- PROGRESO -->
   <div id="quiz-area">
@@ -877,6 +881,10 @@
       </div>
 
       <div class="respuesta-section">
+        <div class="answer-mode-switch" id="answer-mode-switch" role="group" aria-label="Forma de responder">
+          <button type="button" class="answer-mode-btn" data-answer-mode="buttons">Botones</button>
+          <button type="button" class="answer-mode-btn" data-answer-mode="text">Escribir</button>
+        </div>
         <div class="respuesta-row" id="respuesta-row">
           <div class="input-group">
             <label>1ª Salida</label>
@@ -1067,6 +1075,29 @@ ALL_ENTRIES.forEach(e => {
 
 function ovKey(e) { return e.calle + '|||' + e.origZone; }
 function activeEntries() { return ALL_ENTRIES.filter(e => !DELETED[ovKey(e)]); }
+function needsAssignment(e) {
+  return e.incomplete || (!!PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)] && !e.modified);
+}
+function studyEntries() { return activeEntries().filter(e => !needsAssignment(e)); }
+function uniqueStreetEntries(entries) {
+  const streets = new Map();
+  for (const e of entries) {
+    if (!streets.has(e.calle)) streets.set(e.calle, { ...e, salidas: [] });
+    const street = streets.get(e.calle);
+    for (const pair of e.salidas) {
+      if (!street.salidas.some(s => s[0] === pair[0] && s[1] === pair[1])) street.salidas.push([...pair]);
+    }
+  }
+  return [...streets.values()];
+}
+function renderUnassigned() {
+  const list = activeEntries().filter(needsAssignment);
+  document.getElementById('no-asignadas-area').innerHTML = `<h2>No asignadas (${list.length})</h2>
+    <p>Calles apartadas del estudio hasta completar o revisar sus parques.</p>
+    <table class="stats-table"><thead><tr><th>Calle</th><th>Asignación actual</th><th>Por revisar</th></tr></thead><tbody>${list.map(e =>
+      `<tr><td>${escPlan(e.calle)}</td><td>${escPlan(e.salidas.map(s => s.join(' → ')).join(' / ') || 'Incompleta')}</td><td>${escPlan(e.incomplete ? 'Faltan parques' : 'Propuesta Excel: ' + PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)])}</td></tr>`
+    ).join('')}</tbody></table>`;
+}
 
 function applyOverrides() {
   // Reset a original
@@ -1383,7 +1414,9 @@ function reinforceReason(rec) {
 // Devuelve el grupo temático activo SOLO si estamos en Todas/Repaso con un
 // filtro de temática concreto seleccionado (no "todas los grupos").
 function grupoFiltroActivo() {
-  return null;
+  if (activePlanReviewGroup) return null;
+  const grupo = getGrupoSel(currentZone);
+  return grupo !== 'todas' && grupo !== '__sin_asignar__' ? grupo : null;
 }
 function saveRecord(calle, rec) {
   store[calle] = rec;
@@ -1397,6 +1430,17 @@ let currentZone = 'todas';
 let onlyFailed = false;
 let queue = [];
 let activePlanReviewGroup = null;
+let answerMode = 'buttons';
+function answerModeKey() { return 'quiz_valencia_2500_v1_ANSWER_MODE_' + CURRENT_USER; }
+function updateAnswerModeUI() {
+  document.querySelectorAll('.parque-options').forEach(group => { group.style.display = answerMode === 'buttons' ? '' : 'none'; });
+  ['sel-primero','sel-apoyo'].forEach(id => { document.getElementById(id).style.display = answerMode === 'text' ? '' : 'none'; });
+  document.querySelectorAll('[data-answer-mode]').forEach(button => {
+    button.classList.toggle('active', button.dataset.answerMode === answerMode);
+    button.disabled = answered;
+    button.setAttribute('aria-pressed', String(button.dataset.answerMode === answerMode));
+  });
+}
 
 // ============================================================
 // CALENDARIO DE REPASO POR CALLE (+1, +3, +7, +14, +30 días)
@@ -1451,7 +1495,7 @@ function recordPlanAttempt(calle, correct) {
 }
 function dueEntries() {
   const plan = loadPlan(), now = todayISO();
-  return activeEntries().filter(e => plan[e.calle] && plan[e.calle].due <= now)
+  return uniqueStreetEntries(studyEntries()).filter(e => plan[e.calle] && plan[e.calle].due <= now)
     .sort((a,b) => plan[a.calle].due.localeCompare(plan[b.calle].due) || a.calle.localeCompare(b.calle,'es'));
 }
 function renderStudyPlan() {
@@ -1504,22 +1548,22 @@ function setGrupoSel(zone, grupo) { saveGrupoSel(zone, grupo); }
 function populateGrupoSelect(zone = 'norte') {
   const sel = document.getElementById('grupo-filter-select');
   const zoneName = capZone(zone);
-  const entries = activeEntries().filter(e => e.zone === zoneName);
+  const entries = uniqueStreetEntries(studyEntries().filter(e => ['todas', 'repaso'].includes(zone) || e.zone === zoneName));
   const counts = {};
   entries.forEach(e => { counts[e.grupo || '__sin_asignar__'] = (counts[e.grupo || '__sin_asignar__'] || 0) + 1; });
   const selected = getGrupoSel(zone);
   sel.setAttribute('aria-label', `Filtrar ${zoneName} por temática`);
   sel.innerHTML = `<option value="todas">Todas las temáticas (${entries.length})</option>` +
-    GRUPOS.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g} (${counts[g] || 0})</option>`).join('') +
-    `<option value="__sin_asignar__">⚠ Sin asignar (${counts.__sin_asignar__ || 0})</option>`;
+    [...new Set([...GRUPOS, ...studyEntries().map(e => e.grupo).filter(Boolean)])].sort((a,b) => a.localeCompare(b,'es')).map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g} (${counts[g] || 0})</option>`).join('') +
+    `<option value="__sin_asignar__">Sin temática (${counts.__sin_asignar__ || 0})</option>`;
   sel.value = [...sel.options].some(o => o.value === selected) ? selected : 'todas';
 }
 
 function updateGrupoWarning(zone) {
   const warning = document.getElementById('grupo-warning');
-  const thematicZone = ['norte', 'central', 'campanar', 'oeste'].includes(zone);
+  const thematicZone = ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
   const zoneName = thematicZone ? capZone(zone) : '';
-  const count = thematicZone ? activeEntries().filter(e => e.zone === zoneName && !e.grupo).length : 0;
+  const count = thematicZone ? studyEntries().filter(e => (['todas', 'repaso'].includes(zone) || e.zone === zoneName) && !e.grupo).length : 0;
   const show = thematicZone && count > 0;
   warning.classList.toggle('show', show);
   document.getElementById('grupo-warning-text').textContent =
@@ -1528,7 +1572,7 @@ function updateGrupoWarning(zone) {
 
 function updateGrupoFilterUI(zone) {
   const wrap = document.getElementById('grupo-filter');
-  const show = ['norte', 'central', 'campanar', 'oeste'].includes(zone);
+  const show = ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
   wrap.classList.toggle('show', show);
   if (show) populateGrupoSelect(zone);
   updateGrupoWarning(zone);
@@ -1537,33 +1581,20 @@ let qIndex = 0;
 let answered = false;
 let sessionOk = 0;
 let sessionFail = 0;
-let pendingStartCount = 0;
 
 function isFailedRec(r) {
   return !!(r && r.pendingFail);
 }
 
 function getFilteredEntries(zone) {
-  if (zone === 'todas') {
-    let list = [...activeEntries()];
-    if (activePlanReviewGroup === '__due__') return dueEntries();
-    return list;
-  }
-  if (zone === 'pendientes') {
-    return activeEntries().filter(e => !getRecord(e.calle).revisada);
-  }
-  if (zone === 'repaso') {
-    return activeEntries().filter(e => isFailedRec(store[e.calle]));
-  }
-  const z = zone.charAt(0).toUpperCase() + zone.slice(1);
-  let list = activeEntries().filter(e => e.zone === z);
-  if (['norte', 'central', 'campanar', 'oeste'].includes(zone)) {
-    const grupo = getGrupoSel(zone);
-    if (grupo === '__sin_asignar__') list = list.filter(e => !e.grupo);
-    else if (grupo !== 'todas') list = list.filter(e => e.grupo === grupo);
-  }
-  if (onlyFailed) list = list.filter(e => isFailedRec(store[e.calle]));
-  return list;
+  if (activePlanReviewGroup === '__due__') return dueEntries();
+  let list = studyEntries();
+  if (!['todas', 'repaso'].includes(zone)) list = list.filter(e => e.zone === capZone(zone));
+  const grupo = getGrupoSel(zone);
+  if (grupo === '__sin_asignar__') list = list.filter(e => !e.grupo);
+  else if (grupo !== 'todas') list = list.filter(e => e.grupo === grupo);
+  if (zone === 'repaso' || onlyFailed) list = list.filter(e => isFailedRec(store[e.calle]));
+  return uniqueStreetEntries(list);
 }
 
 function updateZoneFilterUI(zone) {
@@ -1594,14 +1625,11 @@ function startQuiz(zone) {
   renderMastery();
   document.getElementById('plan-review-badge').classList.toggle('show', !!activePlanReviewGroup);
   const entries = getFilteredEntries(zone);
-  pendingStartCount = zone === 'pendientes' ? entries.length : 0;
   if (!entries.length) {
     document.getElementById('quiz-card').style.display = 'none';
     document.getElementById('completed-card').classList.remove('show');
-    const grupoTxt = '';
-    const msg = zone === 'pendientes'
-      ? '¡Ya has revisado todas las calles al menos una vez!'
-      : zone === 'repaso'
+    const grupoTxt = grupoFiltroActivo() ? ' de «' + escPlan(grupoFiltroActivo()) + '»' : '';
+    const msg = zone === 'repaso'
       ? (grupoTxt
           ? `No hay calles falladas${grupoTxt} (aún).<br>¡Sigue practicando ese grupo!`
           : 'No hay calles falladas aún.<br>Practica primero en otra pestaña.')
@@ -1668,7 +1696,7 @@ function renderQuestion() {
   document.getElementById('completed-card').classList.remove('show');
   const card = document.getElementById('quiz-card');
   // reset color classes (oculto en 'todas' para no delatar el parque por el color)
-  const hideColor = (currentZone === 'todas' || currentZone === 'pendientes' || currentZone === 'repaso');
+  const hideColor = (currentZone === 'todas' || currentZone === 'repaso');
   card.className = 'quiz-card ' + (hideColor ? 'zone-hidden' : 'zone-' + e.zone.toLowerCase());
 
   document.getElementById('calle-nombre').innerHTML =
@@ -1731,7 +1759,7 @@ function renderQuestion() {
   syncParkOptions(selP);
   syncParkOptions(selA);
 
-  if (currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso') {
+  if (currentZone !== 'todas' && currentZone !== 'repaso') {
     // solo apoyo
     row.className = 'respuesta-row single';
     selP.parentElement.style.display = 'none';
@@ -1743,29 +1771,18 @@ function renderQuestion() {
     grupoApoyo.style.display = 'block';
     selA.parentElement.querySelector('label').textContent = '2ª Salida (apoyo)';
   }
+  updateAnswerModeUI();
 
   // Progress
-  if (currentZone === 'pendientes') updatePendingProgress();
-  else document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}`;
+  document.getElementById('progress-label').textContent = `${qIndex + 1} / ${queue.length}`;
   document.getElementById('btn-back').disabled = qIndex === 0;
-  if (currentZone !== 'pendientes') {
-    document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
-  }
+  document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
 
   document.getElementById('btn-check').textContent = 'Comprobar';
   document.getElementById('btn-check').disabled = false;
   document.getElementById('feedback-bar').classList.remove('show');
 
   updateHeaderStats();
-}
-
-function updatePendingProgress() {
-  const { learned, total } = computeMastery('todas');
-  const remaining = total - learned;
-  document.getElementById('progress-label').textContent = `Quedan ${remaining} sin revisar`;
-  document.getElementById('progress-fill').style.width = pendingStartCount
-    ? `${Math.max(0, Math.min(100, ((pendingStartCount - remaining) / pendingStartCount) * 100))}%`
-    : '100%';
 }
 
 function checkAnswer() {
@@ -1775,7 +1792,7 @@ function checkAnswer() {
   const rec = getRecord(e.calle);
   const selP = document.getElementById('sel-primero');
   const selA = document.getElementById('sel-apoyo');
-  const isZoneMode = currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso';
+  const isZoneMode = currentZone !== 'todas' && currentZone !== 'repaso';
 
   let correct = false;
   let respuestaConcreta = '';
@@ -1784,7 +1801,7 @@ function checkAnswer() {
 
   // Solo son válidas las combinaciones cuyo primer parque coincide con la
   // zona de la calle. El orden primera salida → apoyo es estricto.
-  const real = e.salidas.filter(s => s[0] === e.zone);
+   const real = isZoneMode ? e.salidas.filter(s => s[0] === e.zone) : e.salidas;
   if (!real.length) {
     alert('Esta calle no tiene ambos parques asignados. Pulsa “Modificar” para completarla antes de responder.');
     return;
@@ -1865,10 +1882,7 @@ function checkAnswer() {
   updateAprendidaBtn(rec);
   updateHeaderStats();
   renderMastery();
-  if (currentZone === 'pendientes') {
-    updatePendingProgress();
-    document.getElementById('btn-back').disabled = true;
-  }
+  updateAnswerModeUI();
 }
 
 function showFeedback(ok, e) {
@@ -1877,9 +1891,9 @@ function showFeedback(ok, e) {
   document.getElementById('feedback-icon').textContent = ok ? '✓' : '✗';
   document.getElementById('feedback-text').textContent = ok ? '¡Correcto!' : 'Incorrecto';
   if (!ok) {
-    const isZoneMode = currentZone !== 'todas' && currentZone !== 'pendientes' && currentZone !== 'repaso';
+    const isZoneMode = currentZone !== 'todas' && currentZone !== 'repaso';
     // Solo las combinaciones reales (donde el 1º parque es el de origen de la calle).
-    const real = e.salidas.filter(s => s[0] === e.zone);
+    const real = isZoneMode ? e.salidas.filter(s => s[0] === e.zone) : e.salidas;
 
     let combos;
     if (isZoneMode) {
@@ -1918,11 +1932,7 @@ function nextQuestion() {
     rec.nota = document.getElementById('nota-textarea').value;
     saveRecord(e.calle, rec);
   }
-  if (currentZone === 'pendientes' && answered) {
-    queue.splice(qIndex, 1);
-  } else {
-    qIndex++;
-  }
+  qIndex++;
   document.getElementById('feedback-bar').classList.remove('show');
   renderQuestion();
 }
@@ -1931,9 +1941,7 @@ function showCompleted() {
   document.getElementById('quiz-card').style.display = 'none';
   const c = document.getElementById('completed-card');
   c.classList.add('show');
-  document.getElementById('completed-sub').textContent = currentZone === 'pendientes'
-    ? `${sessionOk} acertadas · ${sessionFail} falladas · ${getFilteredEntries('pendientes').length} pendientes por revisar`
-    : `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
+  document.getElementById('completed-sub').textContent = `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
   if (activePlanReviewGroup) {
     document.getElementById('completed-sub').textContent += ' · Repaso registrado';
     activePlanReviewGroup = null;
@@ -1949,20 +1957,20 @@ function updateHeaderStats() {
 // PROGRESO / CALLES REVISADAS
 // ============================================================
 function computeMastery(zone) {
-  let list = activeEntries();
+  let list = studyEntries();
   if (zone && zone !== 'todas') {
     const z = capZone(zone);
     list = list.filter(e => e.zone === z);
   }
+  list = uniqueStreetEntries(list);
   const total = list.length;
-  const learned = list.filter(e => getRecord(e.calle).revisada).length;
+  const learned = list.filter(e => getRecord(e.calle).aprendida).length;
   const pct = total ? Math.round((learned / total) * 100) : 0;
   return { learned, total, pct };
 }
 
 function renderMastery() {
   const g = computeMastery('todas');
-  const pending = Math.max(0, g.total - g.learned);
   document.getElementById('mastery-global-pct').textContent = g.pct + '%';
   document.getElementById('mastery-global-count').textContent = `(${g.learned}/${g.total})`;
   document.getElementById('mastery-global-fill').style.width = g.pct + '%';
@@ -1972,7 +1980,7 @@ function renderMastery() {
     const el = document.getElementById('pct-' + z);
     if (el) el.textContent = ` ${m.pct}%`;
   });
-  document.getElementById('count-pendientes').textContent = ` ${pending}`;
+  document.getElementById('count-no-asignadas').textContent = ` ${activeEntries().filter(needsAssignment).length}`;
 }
 
 function updateAprendidaBtn(rec) {
@@ -2222,7 +2230,7 @@ function belowScope() {
 
 function renderBelowQuiz() {
   const scope = belowScope();
-  const grupo = null;
+  const grupo = grupoFiltroActivo();
   const label = grupo ? ' de «' + grupo + '»' : (scope === 'todas' ? '' : ' de ' + capZone(scope));
   document.getElementById('below-quiz').innerHTML = `
     <div class="collapsible" data-scope="${scope}">
@@ -2365,6 +2373,20 @@ function importData(text) {
 // ============================================================
 // EVENTS
 // ============================================================
+document.getElementById('answer-mode-switch').addEventListener('click', event => {
+  const button = event.target.closest('[data-answer-mode]');
+  if (!button || answered) return;
+  answerMode = button.dataset.answerMode;
+  try { localStorage.setItem(answerModeKey(), answerMode); } catch {}
+  ['sel-primero','sel-apoyo'].forEach(id => {
+    const input = document.getElementById(id);
+    input.value = '';
+    input.style.borderColor = '';
+    syncParkOptions(input);
+  });
+  document.querySelectorAll('.parque-options').forEach(group => group.classList.remove('missing'));
+  updateAnswerModeUI();
+});
 document.getElementById('respuesta-row').addEventListener('click', event => {
   const button = event.target.closest('.parque-option');
   if (!button || answered) return;
@@ -2400,8 +2422,16 @@ document.getElementById('tabs').addEventListener('click', e => {
   const statsArea = document.getElementById('stats-area');
   const histArea = document.getElementById('historial-area');
   const planArea = document.getElementById('study-plan');
+  const unassignedArea = document.getElementById('no-asignadas-area');
+  unassignedArea.style.display = zone === 'no-asignadas' ? 'block' : 'none';
 
-  if (zone === 'plan') {
+  if (zone === 'no-asignadas') {
+    quizArea.style.display = 'none';
+    statsArea.style.display = 'none';
+    histArea.style.display = 'none';
+    planArea.style.display = 'none';
+    renderUnassigned();
+  } else if (zone === 'plan') {
     quizArea.style.display = 'none';
     statsArea.style.display = 'none';
     histArea.style.display = 'none';
@@ -2442,7 +2472,6 @@ document.getElementById('grupo-filter-select').addEventListener('change', (ev) =
   startQuiz(currentZone);
 });
 document.getElementById('grupo-warning-review').addEventListener('click', () => {
-  if (currentZone !== 'norte' && currentZone !== 'campanar') return;
   setGrupoSel(currentZone, '__sin_asignar__');
   startQuiz(currentZone);
 });
@@ -2551,7 +2580,7 @@ document.getElementById('btn-check').addEventListener('click', () => {
 });
 
 document.getElementById('btn-back').addEventListener('click', () => {
-  if (qIndex === 0 || (currentZone === 'pendientes' && answered)) return;
+  if (qIndex === 0) return;
   // save nota of current before going back
   if (qIndex < queue.length) {
     const e = queue[qIndex];
@@ -2662,6 +2691,11 @@ function getDailyPhrase() {
 function enterApp(user) {
   CURRENT_USER = user;
   store = loadStorage();
+  try { answerMode = localStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }
+  document.getElementById('no-asignadas-area').style.display = 'none';
+  document.getElementById('quiz-area').style.display = 'block';
+  document.getElementById('stats-area').style.display = 'none';
+  document.getElementById('historial-area').style.display = 'none';
   document.getElementById('user-select-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('switch-user-btn').textContent = '↩ ' + user;
