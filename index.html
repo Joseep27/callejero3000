@@ -135,6 +135,12 @@
     border: 1px solid var(--border); border-radius: 8px;
   }
   .mod-input:focus { outline: none; border-color: var(--campanar); }
+  .mod-answer-row { display:grid; grid-template-columns:1fr 1fr auto; gap:10px; margin-bottom:10px; align-items:end; }
+  .mod-answer-row .input-group { min-width:0; }
+  .mod-answer-row label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .mod-remove-answer { width:34px; height:40px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--wrong); cursor:pointer; }
+  .mod-add-answer { margin:0 0 12px; border:1px dashed var(--campanar); background:transparent; color:var(--campanar); border-radius:8px; padding:7px 12px; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:700; }
+  @media (max-width:560px) { .mod-answer-row { grid-template-columns:1fr; } .mod-remove-answer { width:100%; } }
   .mod-actions { display: flex; gap: 10px; align-items: center; }
   .btn-mod-save {
     font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
@@ -912,23 +918,21 @@
       </div>
 
       <div id="modify-panel">
-        <div class="mod-title">Modificar temática y salidas de esta calle</div>
+        <div class="mod-title">Modificar esta calle</div>
+        <div class="mod-row">
+          <div class="input-group">
+            <label for="mod-calle">Nombre de la calle</label>
+            <input type="text" class="mod-input" id="mod-calle" autocomplete="off">
+          </div>
+        </div>
         <div class="mod-row mod-theme-row">
           <div class="input-group">
             <label>Temática</label>
             <select class="mod-input" id="mod-grupo"></select>
           </div>
         </div>
-        <div class="mod-row">
-          <div class="input-group">
-            <label>Nueva 1ª Salida</label>
-            <input type="text" class="mod-input" id="mod-p1" list="zonas-list" autocomplete="off" placeholder="Norte / Central / Oeste / Campanar / Saler">
-          </div>
-          <div class="input-group">
-            <label>Nueva 2ª Salida</label>
-            <input type="text" class="mod-input" id="mod-p2" list="zonas-list" autocomplete="off" placeholder="Norte / Central / Oeste / Campanar / Saler">
-          </div>
-        </div>
+        <div id="mod-answers-list"></div>
+        <button type="button" class="mod-add-answer" id="btn-mod-add-answer">+ Añadir otra respuesta</button>
         <div class="mod-actions">
           <button type="button" class="btn-mod-save" id="btn-mod-save">Guardar</button>
           <button type="button" class="btn-mod-cancel" id="btn-mod-cancel">Cancelar</button>
@@ -1012,6 +1016,85 @@ THEME_ROWS.forEach(row => {
   THEME_BY_STREET.set(normalizeStreet(alias), row.grupo);
 });
 
+// Clasificaciones y exclusiones de Saler confirmadas por el usuario.
+// Se conservan intactos los datos originales para auditoría.
+const SALER_REVIEW = {
+  "assignments": {
+    "C/ AMURA": "Topónimos / Otros",
+    "C/ BOTAVARA": "Topónimos / Otros",
+    "C/ CABRESTANT": "Topónimos / Otros",
+    "C/ ESCOTILLA": "Topónimos / Otros",
+    "C/ ESTRIBORD": "Topónimos / Otros",
+    "C/ PROA": "Topónimos / Otros",
+    "C/ QUILLA": "Topónimos / Otros",
+    "C/ ESLORA": "Topónimos / Otros",
+    "C/ HÈLIX": "Topónimos / Otros",
+    "C/ E.P. PA. ESLORA": "Topónimos / Otros",
+    "C/ SOTAVENT": "Naturaleza / Viento",
+    "C/ ANGUILERA": "Naturaleza / Viento",
+    "C/ ARQUEBISBE ALIAGA": "Santos / Religiosos",
+    "C/ CALP": "Ciudades esp. / valencianas",
+    "C/ CANONGE ALCOVER": "Santos / Religiosos",
+    "C/ CAUDETE": "Ciudades esp. / valencianas",
+    "C/ CIRAT": "Ciudades esp. / valencianas",
+    "C/ DEVESA": "Naturaleza / Viento",
+    "C/ FRANCISCO MONLEÓN": "Apellidos ilustres",
+    "AV GAVINES": "Naturaleza / Viento",
+    "C/ REDOLINS": "Topónimos / Otros",
+    "C/ HISTORIADOR BETÍ": "Cronistas / Oficios",
+    "PL SEQUIOTA": "Ciudades esp. / valencianas",
+    "C/ DUNES": "Naturaleza / Viento",
+    "AV PINARS": "Naturaleza / Viento",
+    "C/ MARÍ VILLAMIL": "Apellidos ilustres",
+    "C/ MASCARÓ": "Topónimos / Otros",
+    "C/ MESSANA": "Topónimos / Otros",
+    "C/ MONÒVER": "Topónimos / Otros",
+    "CAMI MONTANYARS": "Naturaleza / Viento",
+    "C/ MOSSÉN CUENCA": "Santos / Religiosos",
+    "C/ NOVELDA": "Ciudades esp. / valencianas",
+    "TRAV PINEDO A LA MAR": "Topónimos / Otros",
+    "C/ PORT DE L'ALBUFERA": "Topónimos / Otros",
+    "C/ REI D'ARTIEDA": "Apellidos ilustres",
+    "ENTD VALERO": "Apellidos ilustres",
+    "C/ VILA JOIOSA": "Topónimos / Otros",
+    "C/ VESCOMTE DE VALDESOTO": "Santos / Religiosos",
+    "C/ VERGE DE LA MAR": "Santos / Religiosos",
+    "C/ PINTOR MARTÍ GIRBÉS": "Pintores / Escultores",
+    "C/ SERRELLA": "Santos / Religiosos",
+    "C/ PINTOR MANUEL SIGÜENZA": "Pintores / Escultores",
+    "AV GOLA DEL PUJOL": "Topónimos / Otros",
+    "PL PORTADORS DE LA VERGE": "Topónimos / Otros",
+    "C/ CASBAH DEL SALER": "Topónimos / Otros",
+    "PL GINJOLERS": "Topónimos / Otros",
+    "C/ MARTINET": "Apellidos ilustres",
+    "C/ LLOBARRO": "Naturaleza / Viento",
+    "CAMI TRILLADORA DEL TOCAIO": "Topónimos / Otros",
+    "C/ PIVEROT": "Topónimos / Otros",
+    "C/ SÈQUIA DEL REI": "Topónimos / Otros",
+    "C/ RAMBLA DE EL SALER": "Topónimos / Otros",
+    "C/ COLLVERD": "Topónimos / Otros",
+    "C/ ORONETA": "Topónimos / Otros",
+    "C/ SANTÍSSIM CRIST DE LA SALUT": "Santos / Religiosos",
+    "C/ JESUSET DE L'HORT": "Santos / Religiosos",
+    "C/ LLEBEIG": "Topónimos / Otros",
+    "C/ PASCUAL TATAY SANJULIÁN (REVEREND)": "Apellidos ilustres",
+    "PL CASA DE LA DEMANÀ": "Topónimos / Otros",
+    "PLAYA DEL SALER": "Naturaleza / Viento",
+    "CV DEVESA": "Naturaleza / Viento",
+    "CAMI MUNTANYAR DE LA MONA": "Naturaleza / Viento",
+    "CV-500": "Topónimos / Otros"
+  },
+  "deletions": [
+    "C/ EP FRANCISCO MONLEON",
+    "C/ EP NOVELDA (PARALELA)",
+    "C/ EP VICENTE BALDOVÍ (PERPENDICULAR)",
+    "C/ EP MARTI GIRBES (PERPENDICULAR)"
+  ]
+};
+Object.entries(SALER_REVIEW.assignments).forEach(([street, theme]) => {
+  THEME_BY_STREET.set(normalizeStreet(street), theme);
+});
+
 // Parse CSV → array of entries
 // Each entry: { zone, grupo, calle, salidas: [[p1,p2], ...] }
 function quizPark(value) {
@@ -1045,7 +1128,7 @@ function parseData(rows) {
   });
 }
 
-const ALL_ENTRIES = parseData(SOURCE_ROWS);
+const ALL_ENTRIES = parseData(SOURCE_ROWS).filter(e => !SALER_REVIEW.deletions.includes(e.official));
 const GRUPOS = [...new Set(THEME_ROWS.map(row => row.grupo))].sort((a, b) => a.localeCompare(b, 'es'));
 
 // ============================================================
@@ -1067,18 +1150,22 @@ let DELETED = loadDeleted();
 
 // Guardar el estado original de cada entrada para poder revertir/reaplicar
 ALL_ENTRIES.forEach(e => {
+  e.origCalle = e.calle;
   e.origZone = e.zone;
   e.origGrupo = e.grupo;
   e._origSalidas = e.salidas.map(s => [...s]);
   e._origIncomplete = e.incomplete;
 });
 
-function ovKey(e) { return e.calle + '|||' + e.origZone; }
+function ovKey(e) { return (e.origCalle || e.calle) + '|||' + e.origZone; }
 function activeEntries() { return ALL_ENTRIES.filter(e => !DELETED[ovKey(e)]); }
 function needsAssignment(e) {
   return e.incomplete || (!!PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)] && !e.modified);
 }
 function studyEntries() { return activeEntries().filter(e => !needsAssignment(e)); }
+function entriesForPark(entries, park) {
+  return entries.filter(e => e.salidas.some(s => s[0] === park)).map(e => ({ ...e, zone: park }));
+}
 function uniqueStreetEntries(entries) {
   const streets = new Map();
   for (const e of entries) {
@@ -1102,6 +1189,7 @@ function renderUnassigned() {
 function applyOverrides() {
   // Reset a original
   ALL_ENTRIES.forEach(e => {
+    e.calle = e.origCalle;
     e.zone = e.origZone;
     e.salidas = e._origSalidas.map(s => [...s]);
     e.grupo = e.origGrupo;
@@ -1114,7 +1202,8 @@ function applyOverrides() {
     const e = ALL_ENTRIES.find(x => ovKey(x) === key);
     if (e) {
       e.zone = ov.z1;
-      e.salidas = [[ov.z1, ov.z2]];
+      e.salidas = (Array.isArray(ov.salidas) && ov.salidas.length ? ov.salidas : [[ov.z1, ov.z2]]).map(s => [...s]);
+      e.calle = ov.newName || e.origCalle;
       if (Object.prototype.hasOwnProperty.call(ov, 'grupo')) e.grupo = ov.grupo;
       e.incomplete = false;
       e.modified = true;
@@ -1361,7 +1450,12 @@ let store = {};
 // Los campos históricos siguen intactos. `recent` es una capa opcional y compatible.
 // store = { [calle]: { ok, fail, streak, nota, aprendida, manual, porGrupo, recent: [{ok,fecha,respuesta}] }, ... }
 
+function recordStreetKey(calle) {
+  const entry = ALL_ENTRIES.find(e => e.calle === calle);
+  return entry ? entry.origCalle : calle;
+}
 function getRecord(calle) {
+  calle = recordStreetKey(calle);
   if (!store[calle]) store[calle] = { ok: 0, fail: 0, streak: 0, nota: '', aprendida: false, manual: false, porGrupo: {} };
   if (store[calle].streak === undefined) store[calle].streak = 0;
   if (store[calle].aprendida === undefined) store[calle].aprendida = false;
@@ -1369,7 +1463,7 @@ function getRecord(calle) {
   if (store[calle].porGrupo === undefined) store[calle].porGrupo = {};
   if (!Array.isArray(store[calle].recent)) store[calle].recent = [];
   if (store[calle].revisada === undefined) store[calle].revisada = false;
-  if (store[calle].pendingFail === undefined) store[calle].pendingFail = !!(store[calle].fail > 0 && (store[calle].streak || 0) < 1);
+  if (store[calle].pendingFail === undefined) store[calle].pendingFail = !!(store[calle].fail > 0 && (store[calle].streak || 0) < 5);
   return store[calle];
 }
 
@@ -1419,7 +1513,7 @@ function grupoFiltroActivo() {
   return grupo !== 'todas' && grupo !== '__sin_asignar__' ? grupo : null;
 }
 function saveRecord(calle, rec) {
-  store[calle] = rec;
+  store[recordStreetKey(calle)] = rec;
   saveStorage(store);
 }
 
@@ -1466,6 +1560,7 @@ function planOffset(stage) {
 }
 function scheduleStreet(calle, from = todayISO()) {
   if (!calle) return;
+  calle = recordStreetKey(calle);
   const plan = loadPlan();
   if (!plan[calle]) {
     plan[calle] = { stage: 0, due: addDaysISO(from, PLAN_INTERVALS[0]), lastDone: from };
@@ -1476,15 +1571,16 @@ function bootstrapExistingReviews() {
   const plan = loadPlan();
   let changed = false;
   activeEntries().forEach(e => {
-    const r = store[e.calle];
-    if (r && ((r.ok || 0) + (r.fail || 0) > 0) && !plan[e.calle]) {
-      plan[e.calle] = { stage:0, due:addDaysISO(todayISO(), 1), lastDone:todayISO(), imported:true };
+    const key = recordStreetKey(e.calle), r = store[key];
+    if (r && ((r.ok || 0) + (r.fail || 0) > 0) && !plan[key]) {
+      plan[key] = { stage:0, due:addDaysISO(todayISO(), 1), lastDone:todayISO(), imported:true };
       changed = true;
     }
   });
   if (changed) savePlan(plan);
 }
 function recordPlanAttempt(calle, correct) {
+  calle = recordStreetKey(calle);
   const plan = loadPlan();
   const item = plan[calle] || { stage:0 };
   item.stage = correct ? Math.min((item.stage || 0) + 1, PLAN_INTERVALS.length - 1) : 0;
@@ -1495,8 +1591,8 @@ function recordPlanAttempt(calle, correct) {
 }
 function dueEntries() {
   const plan = loadPlan(), now = todayISO();
-  return uniqueStreetEntries(studyEntries()).filter(e => plan[e.calle] && plan[e.calle].due <= now)
-    .sort((a,b) => plan[a.calle].due.localeCompare(plan[b.calle].due) || a.calle.localeCompare(b.calle,'es'));
+  return uniqueStreetEntries(studyEntries()).filter(e => plan[recordStreetKey(e.calle)] && plan[recordStreetKey(e.calle)].due <= now)
+    .sort((a,b) => plan[recordStreetKey(a.calle)].due.localeCompare(plan[recordStreetKey(b.calle)].due) || a.calle.localeCompare(b.calle,'es'));
 }
 function renderStudyPlan() {
   if (!CURRENT_USER) return;
@@ -1508,7 +1604,7 @@ function renderStudyPlan() {
     host.innerHTML = '<div class="plan-empty">✅ No tienes calles programadas para hoy. Cada calle contestada se incorporará automáticamente al calendario.</div>';
   } else {
     host.innerHTML = `<div style="display:flex;gap:8px;margin-bottom:10px"><button class="plan-start" data-plan-start-all="1">Empezar las ${due.length}</button><button class="plan-postpone" data-plan-postpone-all="1">Mañana</button></div>` + due.slice(0,100).map(e => {
-      const x = plan[e.calle], overdue = x.due < now;
+      const x = plan[recordStreetKey(e.calle)], overdue = x.due < now;
       const label = overdue ? `Atrasada desde ${x.due.split('-').reverse().join('/')}` : `Hoy · nivel +${planOffset(x.stage)} días`;
       return `<div class="plan-item ${overdue ? 'overdue' : ''}">
         <div class="plan-item-info"><div class="plan-item-name">${escPlan(e.calle)}</div><div class="plan-item-meta">${label}</div></div>
@@ -1548,7 +1644,7 @@ function setGrupoSel(zone, grupo) { saveGrupoSel(zone, grupo); }
 function populateGrupoSelect(zone = 'norte') {
   const sel = document.getElementById('grupo-filter-select');
   const zoneName = capZone(zone);
-  const entries = uniqueStreetEntries(studyEntries().filter(e => ['todas', 'repaso'].includes(zone) || e.zone === zoneName));
+  const entries = uniqueStreetEntries(['todas', 'repaso'].includes(zone) ? studyEntries() : entriesForPark(studyEntries(), zoneName));
   const counts = {};
   entries.forEach(e => { counts[e.grupo || '__sin_asignar__'] = (counts[e.grupo || '__sin_asignar__'] || 0) + 1; });
   const selected = getGrupoSel(zone);
@@ -1583,17 +1679,19 @@ let sessionOk = 0;
 let sessionFail = 0;
 
 function isFailedRec(r) {
-  return !!(r && r.pendingFail);
+  if (!r) return false;
+  if (typeof r.pendingFail === 'boolean') return r.pendingFail;
+  return r.fail > 0 && (r.streak || 0) < 5;
 }
 
 function getFilteredEntries(zone) {
   if (activePlanReviewGroup === '__due__') return dueEntries();
   let list = studyEntries();
-  if (!['todas', 'repaso'].includes(zone)) list = list.filter(e => e.zone === capZone(zone));
+  if (!['todas', 'repaso'].includes(zone)) list = entriesForPark(list, capZone(zone));
   const grupo = getGrupoSel(zone);
   if (grupo === '__sin_asignar__') list = list.filter(e => !e.grupo);
   else if (grupo !== 'todas') list = list.filter(e => e.grupo === grupo);
-  if (zone === 'repaso' || onlyFailed) list = list.filter(e => isFailedRec(store[e.calle]));
+  if (zone === 'repaso' || onlyFailed) list = list.filter(e => isFailedRec(store[recordStreetKey(e.calle)]));
   return uniqueStreetEntries(list);
 }
 
@@ -1604,7 +1702,7 @@ function updateZoneFilterUI(zone) {
   wrap.classList.toggle('show', isParque);
   if (!isParque) return;
   const z = zone.charAt(0).toUpperCase() + zone.slice(1);
-  const failCount = activeEntries().filter(e => e.zone === z && isFailedRec(store[e.calle])).length;
+  const failCount = entriesForPark(activeEntries(), z).filter(e => isFailedRec(store[recordStreetKey(e.calle)])).length;
   btn.classList.toggle('active', onlyFailed);
   btn.textContent = onlyFailed ? 'Ver todas' : `★ Solo falladas (${failCount})`;
 }
@@ -1700,7 +1798,7 @@ function renderQuestion() {
   card.className = 'quiz-card ' + (hideColor ? 'zone-hidden' : 'zone-' + e.zone.toLowerCase());
 
   document.getElementById('calle-nombre').innerHTML =
-    e.calle + (e.modified ? '<span class="mod-badge">modificada</span>' : '');
+    escPlan(e.calle) + (e.modified ? '<span class="mod-badge">modificada</span>' : '');
   const grupoEl = document.getElementById('calle-grupo');
   const translation = e.translation && e.translation !== e.calle ? e.translation : '';
   const details = [];
@@ -1844,15 +1942,23 @@ function checkAnswer() {
   if (correct) {
     rec.ok++;
     rec.streak = (rec.streak || 0) + 1;
-    rec.pendingFail = false;
+    if (currentZone === 'repaso') rec.pendingFail = false;
     sessionOk++;
     showFeedback(true, e);
   } else {
     rec.fail++;
     rec.streak = 0;
+    rec.aprendida = false;
+    rec.manual = false;
     rec.pendingFail = true;
+    rec.pendingFailEntry = ovKey(e);
     sessionFail++;
     showFeedback(false, e);
+    if (currentZone !== 'todas') {
+      const distance = 3 + Math.floor(Math.random() * 2);
+      const insertAt = Math.min(queue.length, qIndex + distance + 1);
+      queue.splice(insertAt, 0, e);
+    }
   }
 
   // Historial por temática: solo suma aquí si estamos estudiando con un
@@ -1864,9 +1970,9 @@ function checkAnswer() {
     if (correct) rec.porGrupo[grupoActivo].ok++; else rec.porGrupo[grupoActivo].fail++;
   }
 
-  // Aprendida automática: 5 aciertos seguidos. Si el usuario la controla
-  // manualmente, no la tocamos (ni al acertar ni al fallar).
-  if (!rec.manual) {
+  // Igual que callesvalencia: los aciertos de Repaso suman para el check.
+  // Un fallo siempre desmarca aprendida y reinicia la racha.
+  if (correct && !rec.manual) {
     rec.aprendida = rec.streak >= 5;
   }
 
@@ -1960,7 +2066,7 @@ function computeMastery(zone) {
   let list = studyEntries();
   if (zone && zone !== 'todas') {
     const z = capZone(zone);
-    list = list.filter(e => e.zone === z);
+    list = entriesForPark(list, z);
   }
   list = uniqueStreetEntries(list);
   const total = list.length;
@@ -1998,7 +2104,7 @@ function capZone(z) { return z.charAt(0).toUpperCase() + z.slice(1); }
 function statsTableHTML(scope, grupo) {
   let list = activeEntries().map(e => ({ ...e, rec: getRecord(e.calle) }))
     .filter(e => e.rec.fail > 0 || e.rec.ok > 0);
-  if (scope && scope !== 'todas') { const z = capZone(scope); list = list.filter(e => e.zone === z); }
+  if (scope && scope !== 'todas') { const z = capZone(scope); list = entriesForPark(list, z); }
   if (grupo) list = list.filter(e => e.grupo === grupo);
   list = list.map(e => ({ ...e, dominio: masteryScore(e.rec) }))
     .filter(e => e.dominio < 80 || (e.rec.recent || []).some(x => !x.ok));
@@ -2018,7 +2124,7 @@ function statsTableHTML(scope, grupo) {
     const streak = e.rec.streak || 0;
     const streakLabel = streak > 0 ? `<span style="color:var(--correct);font-size:11px">🔥${streak}</span>` : '';
     return `<tr>
-      <td><span class="bar-mini" style="width:${barW}px"></span> ${e.calle} ${streakLabel}</td>
+      <td><span class="bar-mini" style="width:${barW}px"></span> ${escPlan(e.calle)} ${streakLabel}</td>
       <td><span class="badge-parque ${badgeClass}">${e.zone}</span></td>
       <td style="text-align:right"><strong>${e.dominio}%</strong></td>
       <td>${escPlan(reinforceReason(e.rec))}</td>
@@ -2044,6 +2150,31 @@ function renderStats() {
 // ============================================================
 // MODIFICAR CALLE
 // ============================================================
+function answerRowHTML(pair = ['', '']) {
+  return `<div class="mod-answer-row"><div class="input-group"><label>1ª Salida</label><input class="mod-input mod-answer-p1" list="zonas-list" autocomplete="off" aria-label="1ª Salida" value="${escPlan(pair[0] || '')}"></div>
+    <div class="input-group"><label>2ª Salida</label><input class="mod-input mod-answer-p2" list="zonas-list" autocomplete="off" aria-label="2ª Salida" value="${escPlan(pair[1] || '')}"></div>
+    <button type="button" class="mod-remove-answer" title="Quitar esta respuesta" aria-label="Quitar esta respuesta">×</button></div>`;
+}
+function renderModifyAnswers(pairs) {
+  document.getElementById('mod-answers-list').innerHTML = (pairs.length ? pairs : [['', '']]).map(answerRowHTML).join('');
+}
+function collectModifiedAnswers() {
+  const answers = [];
+  const valid = new Set(['Norte', 'Central', 'Oeste', 'Campanar', 'Saler']);
+  for (const row of document.querySelectorAll('#mod-answers-list .mod-answer-row')) {
+    const p1 = row.querySelector('.mod-answer-p1');
+    const p2 = row.querySelector('.mod-answer-p2');
+    const z1 = quizPark(p1.value), z2 = quizPark(p2.value);
+    p1.style.borderColor = valid.has(z1) ? '' : 'var(--wrong)';
+    p2.style.borderColor = valid.has(z2) ? '' : 'var(--wrong)';
+    if (!valid.has(z1) || !valid.has(z2)) {
+      alert('Completa cada respuesta con Norte, Central, Oeste, Campanar o Saler.');
+      return null;
+    }
+    if (!answers.some(s => s[0] === z1 && s[1] === z2)) answers.push([z1, z2]);
+  }
+  return answers;
+}
 function openModifyPanel() {
   if (qIndex >= queue.length) return;
   const e = queue[qIndex];
@@ -2052,11 +2183,12 @@ function openModifyPanel() {
   grupoSelect.innerHTML = '<option value="">⚠ Sin asignar</option>' +
     GRUPOS.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
   grupoSelect.value = e.grupo || '';
-  document.getElementById('mod-p1').value = e.salidas[0] ? e.salidas[0][0] : '';
-  document.getElementById('mod-p2').value = e.salidas[0] ? e.salidas[0][1] : '';
+  document.getElementById('mod-calle').value = e.calle;
+  document.getElementById('mod-calle').style.borderColor = '';
+  renderModifyAnswers(e.salidas);
   document.getElementById('btn-mod-revert').style.display = e.modified ? 'inline' : 'none';
   panel.classList.add('open');
-  document.getElementById('mod-p1').focus();
+  document.getElementById('mod-calle').focus();
 }
 
 
@@ -2090,26 +2222,25 @@ function saveModify() {
   if (qIndex >= queue.length) return;
   const e = queue[qIndex];
   const grupo = document.getElementById('mod-grupo').value;
-  const z1 = document.getElementById('mod-p1').value.trim();
-  const z2 = document.getElementById('mod-p2').value.trim();
-  if (!z1 || !z2) {
-    document.getElementById('mod-p1').style.borderColor = z1 ? '' : 'var(--wrong)';
-    document.getElementById('mod-p2').style.borderColor = z2 ? '' : 'var(--wrong)';
+  const newName = document.getElementById('mod-calle').value.trim();
+  if (!newName) {
+    document.getElementById('mod-calle').style.borderColor = 'var(--wrong)';
     return;
   }
-  const nz1 = quizPark(z1), nz2 = quizPark(z2);
-  const valid = new Set(['Norte','Central','Oeste','Campanar','Saler']);
-  if (!valid.has(nz1) || !valid.has(nz2)) {
-    alert('Usa únicamente Norte, Central, Oeste, Campanar o Saler.');
+  if (ALL_ENTRIES.some(x => x.origCalle !== e.origCalle && [x.calle, x.origCalle].some(name => normalizeStreet(name) === normalizeStreet(newName)))) {
+    alert('Ya existe otra calle con ese nombre. Usa un nombre diferente para no mezclar sus datos.');
     return;
   }
+  const salidas = collectModifiedAnswers();
+  if (!salidas || !salidas.length) return;
+  const [nz1, nz2] = salidas[0];
   const prevZone = e.zone;
 
-  OVERRIDES[ovKey(e)] = { calle: e.calle, origZone: e.origZone, grupo, z1: nz1, z2: nz2, user: CURRENT_USER, ts: Date.now() };
+  OVERRIDES[ovKey(e)] = { calle: e.origCalle, newName, salidas, origZone: e.origZone, grupo, z1: nz1, z2: nz2, user: CURRENT_USER, ts: Date.now() };
   saveOverrides(OVERRIDES);
 
   const hist = loadHist();
-  hist.push({ calle: e.calle, from: prevZone, grupo, z1: nz1, z2: nz2, origZone: e.origZone, user: CURRENT_USER, ts: Date.now(), type: 'mod' });
+  hist.push({ calle: e.origCalle, newCalle: newName, salidas, from: prevZone, grupo, z1: nz1, z2: nz2, origZone: e.origZone, user: CURRENT_USER, ts: Date.now(), type: 'mod' });
   saveHist(hist);
 
   applyOverrides();
@@ -2134,11 +2265,17 @@ function revertModify() {
     delete OVERRIDES[key];
     saveOverrides(OVERRIDES);
     const hist = loadHist();
-    hist.push({ calle: e.calle, from: e.zone, z1: e.origZone, z2: (e._origSalidas[0] ? e._origSalidas[0][1] : ''), origZone: e.origZone, user: CURRENT_USER, ts: Date.now(), type: 'revert' });
+    hist.push({ calle: e.origCalle, from: e.zone, z1: e.origZone, z2: (e._origSalidas[0] ? e._origSalidas[0][1] : ''), origZone: e.origZone, user: CURRENT_USER, ts: Date.now(), type: 'revert' });
     saveHist(hist);
     applyOverrides();
   }
   document.getElementById('modify-panel').classList.remove('open');
+  const restored = getFilteredEntries(currentZone).find(x => ovKey(x) === key);
+  if (restored) queue[qIndex] = restored;
+  else queue.splice(qIndex, 1);
+  if (qIndex >= queue.length) qIndex = Math.max(0, queue.length - 1);
+  updateGrupoFilterUI(currentZone);
+  renderMastery();
   renderQuestion();
 }
 
@@ -2156,7 +2293,7 @@ function histListHTML(scope) {
   let idx = histOrig.map((h, i) => ({ h, i }));
   if (scope && scope !== 'todas') {
     const z = capZone(scope);
-    idx = idx.filter(({ h }) => h.from === z || h.z1 === z || h.origZone === z);
+    idx = idx.filter(({ h }) => h.from === z || h.z1 === z || h.origZone === z || (h.salidas || []).some(s => s[0] === z));
   }
   if (!idx.length) {
     return '<div class="hist-empty">Sin cambios' + (scope && scope !== 'todas' ? ' en este parque' : '') + ' aún.</div>';
@@ -2178,14 +2315,15 @@ function histListHTML(scope) {
     const canRevert = revertibleIdx.has(i);
     const key = h.calle + '|||' + (h.origZone || h.from);
     return `<div class="hist-item ${isRev ? 'revert' : ''}">
-      <span class="hcalle">${h.calle}</span>
+      <span class="hcalle">${escPlan(h.calle)}${h.newCalle && h.newCalle !== h.calle ? ' → ' + escPlan(h.newCalle) : ''}</span>
       <span class="harrow">·</span>
       <span>de</span> <span class="hzone ${zc(h.from)}">${h.from || '—'}</span>
       <span class="harrow">→</span>
       <span>1ª</span> <span class="hzone ${zc(h.z1)}">${h.z1}</span>
       <span>2ª</span> <span class="hzone ${zc(h.z2)}">${h.z2}</span>
+      ${h.salidas && h.salidas.length > 1 ? `<span>${h.salidas.slice(1).map(s => escPlan(s.join(' → '))).join(' / ')}</span>` : ''}
       ${isRev ? '<span class="harrow">(revertida)</span>' : ''}
-      ${canRevert ? `<button class="hist-revert-btn" data-key="${key}">↺ Revertir</button>` : ''}
+      ${canRevert ? `<button class="hist-revert-btn" data-key="${escPlan(key)}">↺ Revertir</button>` : ''}
       <span class="hmeta">${h.user || '?'} · ${fmtDate(h.ts)}</span>
     </div>`;
   }).join('');
@@ -2281,8 +2419,8 @@ function exportData() {
       nota_usuario: rec.nota || '',
       primera_revision: rec.firstSeen || '',
       ultima_revision: rec.lastSeen || '',
-      nivel_plan: plan[e.calle]?.stage ?? '',
-      proximo_repaso: plan[e.calle]?.due || '',
+      nivel_plan: plan[recordStreetKey(e.calle)]?.stage ?? '',
+      proximo_repaso: plan[recordStreetKey(e.calle)]?.due || '',
       modificada: !!e.modified
     };
   });
@@ -2482,7 +2620,7 @@ document.getElementById('plan-list').addEventListener('click', e => {
   if (e.target.closest('[data-plan-start-all]')) { startPlanReview(); return; }
   if (e.target.closest('[data-plan-postpone-all]')) {
     const plan = loadPlan();
-    dueEntries().forEach(entry => { plan[entry.calle].due = addDaysISO(todayISO(), 1); plan[entry.calle].postponedOn = todayISO(); });
+    dueEntries().forEach(entry => { const key = recordStreetKey(entry.calle); plan[key].due = addDaysISO(todayISO(), 1); plan[key].postponedOn = todayISO(); });
     savePlan(plan);
     renderStudyPlan();
   }
@@ -2511,6 +2649,16 @@ document.getElementById('btn-aprendida').addEventListener('click', () => {
   renderMastery();
 });
 document.getElementById('btn-mod-save').addEventListener('click', saveModify);
+document.getElementById('btn-mod-add-answer').addEventListener('click', () => {
+  document.getElementById('mod-answers-list').insertAdjacentHTML('beforeend', answerRowHTML());
+});
+document.getElementById('mod-answers-list').addEventListener('click', event => {
+  const button = event.target.closest('.mod-remove-answer');
+  if (!button) return;
+  const rows = document.querySelectorAll('#mod-answers-list .mod-answer-row');
+  if (rows.length > 1) button.closest('.mod-answer-row').remove();
+  else alert('La calle debe tener al menos una respuesta correcta.');
+});
 document.getElementById('btn-mod-cancel').addEventListener('click', () => {
   document.getElementById('modify-panel').classList.remove('open');
 });
