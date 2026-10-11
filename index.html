@@ -1446,6 +1446,24 @@ function saveStorage(data) {
   try { localStorage.setItem(getLSKey(), JSON.stringify(data)); } catch {}
 }
 
+// Reinicio de Repaso solicitado para esta actualización, una vez por perfil.
+// No modifica notas, aciertos, fallos, rachas, checks ni el calendario.
+function resetLegacyReviewOnce() {
+  const resetKey = LS_KEY_PREFIX + 'REVIEW_RESET_20261011_' + CURRENT_USER;
+  try {
+    if (localStorage.getItem(resetKey) === 'done') return;
+    for (const rec of Object.values(store)) {
+      if (!rec || typeof rec !== 'object' || Array.isArray(rec)) continue;
+      rec.pendingFail = false;
+      delete rec.pendingFailEntry;
+    }
+    localStorage.setItem(getLSKey(), JSON.stringify(store));
+    localStorage.setItem(resetKey, 'done');
+  } catch {
+    alert('No se ha podido guardar el reinicio de Repaso en este navegador. No borres tus datos: exporta una copia antes de liberar espacio.');
+  }
+}
+
 let store = {};
 // Los campos históricos siguen intactos. `recent` es una capa opcional y compatible.
 // store = { [calle]: { ok, fail, streak, nota, aprendida, manual, porGrupo, recent: [{ok,fecha,respuesta}] }, ... }
@@ -2839,6 +2857,7 @@ function getDailyPhrase() {
 function enterApp(user) {
   CURRENT_USER = user;
   store = loadStorage();
+  resetLegacyReviewOnce();
   try { answerMode = localStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }
   document.getElementById('no-asignadas-area').style.display = 'none';
   document.getElementById('quiz-area').style.display = 'block';
