@@ -1160,6 +1160,12 @@ function activeEntries() { return ALL_ENTRIES.filter(e => !DELETED[ovKey(e)]); }
 function needsAssignment(e) {
   return e.incomplete || (!!PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)] && !e.modified);
 }
+function needsPendingReview(e) {
+  // El lote original no depende de renombrados o cambios antiguos. Solo un
+  // guardado explícito desde esta pestaña confirma que se ha comprobado.
+  const candidate = e._origIncomplete || !!PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)];
+  return candidate && OVERRIDES[ovKey(e)]?.pendingReviewConfirmed !== true;
+}
 function studyEntries() { return activeEntries().filter(e => !needsAssignment(e)); }
 function entriesForPark(entries, park) {
   return entries.filter(e => e.salidas.some(s => s[0] === park)).map(e => ({ ...e, zone: park }));
@@ -1724,7 +1730,7 @@ function isFailedRec(r) {
 }
 
 function getFilteredEntries(zone) {
-  if (zone === 'revision') return activeEntries().filter(needsAssignment);
+  if (zone === 'revision') return activeEntries().filter(needsPendingReview);
   if (activePlanReviewGroup) return uniqueStreetEntries(studyEntries().filter(e => e.grupo === activePlanReviewGroup));
   let list = studyEntries();
   if (!['todas', 'repaso'].includes(zone)) list = entriesForPark(list, capZone(zone));
@@ -2387,7 +2393,8 @@ function saveModify() {
   const [nz1, nz2] = salidas[0];
   const prevZone = e.zone;
 
-  OVERRIDES[ovKey(e)] = { calle: e.origCalle, newName, salidas, origZone: e.origZone, grupo, z1: nz1, z2: nz2, user: CURRENT_USER, ts: Date.now() };
+  const pendingReviewConfirmed = currentZone === 'revision' || OVERRIDES[ovKey(e)]?.pendingReviewConfirmed === true;
+  OVERRIDES[ovKey(e)] = { calle: e.origCalle, newName, salidas, origZone: e.origZone, grupo, z1: nz1, z2: nz2, user: CURRENT_USER, ts: Date.now(), pendingReviewConfirmed };
   saveOverrides(OVERRIDES);
 
   const hist = loadHist();
