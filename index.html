@@ -787,6 +787,7 @@
   <div class="tab" data-zone="campanar">Campanar<span class="tab-pct" id="pct-campanar"></span></div>
   <div class="tab" data-zone="saler">Saler<span class="tab-pct" id="pct-saler"></span></div>
   <div class="tab" data-zone="repaso">★ Repaso</div>
+  <div class="tab" data-zone="revision">⚠ Pendientes de revisar <span id="count-revision"></span></div>
   <div class="tab" data-zone="plan" id="tab-plan" style="display:none;">🗓 Plan</div>
   <div class="tab" data-zone="stats">📊 Stats</div>
   <div class="tab" data-zone="historial">📝 Historial</div>
@@ -1723,6 +1724,7 @@ function isFailedRec(r) {
 }
 
 function getFilteredEntries(zone) {
+  if (zone === 'revision') return activeEntries().filter(needsAssignment);
   if (activePlanReviewGroup) return uniqueStreetEntries(studyEntries().filter(e => e.grupo === activePlanReviewGroup));
   let list = studyEntries();
   if (!['todas', 'repaso'].includes(zone)) list = entriesForPark(list, capZone(zone));
@@ -1757,7 +1759,7 @@ function shuffle(arr) {
 // Rondas de estudio persistentes. Repaso y "Solo falladas" conservan su cola
 // de refuerzo. El progreso, las notas y el calendario se guardan por separado.
 function roundScopeKey() {
-  if (currentZone === 'repaso' || onlyFailed) return null;
+  if (currentZone === 'revision' || currentZone === 'repaso' || onlyFailed) return null;
   const scope = activePlanReviewGroup
     ? ['plan', activePlanReviewGroup, loadPlan()[activePlanReviewGroup]?.startedOn || '', loadPlan()[activePlanReviewGroup]?.stage ?? 0]
     : [currentZone, getGrupoSel(currentZone)];
@@ -1844,7 +1846,9 @@ function startQuiz(zone) {
     document.getElementById('quiz-card').style.display = 'none';
     document.getElementById('completed-card').classList.remove('show');
     const grupoTxt = grupoFiltroActivo() ? ' de «' + escPlan(grupoFiltroActivo()) + '»' : '';
-    const msg = zone === 'repaso'
+    const msg = zone === 'revision'
+      ? 'No quedan calles pendientes de revisar. Las guardadas ya están disponibles en el estudio.'
+      : zone === 'repaso'
       ? (grupoTxt
           ? `No hay calles falladas${grupoTxt} (aún).<br>¡Sigue practicando ese grupo!`
           : 'No hay calles falladas aún.<br>Practica primero en otra pestaña.')
@@ -1859,7 +1863,7 @@ function startQuiz(zone) {
     return;
   }
   document.getElementById('empty-state-card').style.display = 'none';
-  queue = roundKey ? persistentRoundEntries(entries, roundKey) : shuffle(entries);
+  queue = zone === 'revision' ? [...entries] : roundKey ? persistentRoundEntries(entries, roundKey) : shuffle(entries);
   qIndex = 0;
   answered = false;
   sessionOk = 0;
@@ -1911,7 +1915,7 @@ function renderQuestion() {
   document.getElementById('completed-card').classList.remove('show');
   const card = document.getElementById('quiz-card');
   // reset color classes (oculto en 'todas' para no delatar el parque por el color)
-  const hideColor = (currentZone === 'todas' || currentZone === 'repaso');
+  const hideColor = ['todas', 'repaso', 'revision'].includes(currentZone);
   card.className = 'quiz-card ' + (hideColor ? 'zone-hidden' : 'zone-' + e.zone.toLowerCase());
 
   document.getElementById('calle-nombre').innerHTML =
@@ -1929,6 +1933,7 @@ function renderQuestion() {
     details.push(`⚠ REVISAR PARQUES: quiz ${currentParks}; Excel ${parkReviewProposal}`);
   }
   if (translation) details.push(translation);
+  if (currentZone === 'revision') details.push('Revisa y guarda en Modificar; pasar a la siguiente no cuenta como acierto ni fallo.');
   grupoEl.textContent = details.join(' · ');
   grupoEl.classList.toggle('unassigned', !e.grupo);
   grupoEl.classList.toggle('review-required', needsParkReview);
@@ -1987,20 +1992,26 @@ function renderQuestion() {
     selA.parentElement.querySelector('label').textContent = '2ª Salida (apoyo)';
   }
   updateAnswerModeUI();
+  const reviewing = currentZone === 'revision';
+  row.style.display = reviewing ? 'none' : '';
+  document.getElementById('answer-mode-switch').style.display = reviewing ? 'none' : '';
+  document.getElementById('btn-aprendida').style.display = reviewing ? 'none' : '';
 
   // Progress
   updateQuestionProgress();
   document.getElementById('btn-back').disabled = qIndex === 0;
   document.getElementById('progress-fill').style.width = `${(qIndex / queue.length) * 100}%`;
 
-  document.getElementById('btn-check').textContent = 'Comprobar';
+  document.getElementById('btn-check').textContent = reviewing ? 'Siguiente sin cambiar →' : 'Comprobar';
   document.getElementById('btn-check').disabled = false;
   document.getElementById('feedback-bar').classList.remove('show');
 
   updateHeaderStats();
+  if (reviewing) openModifyPanel();
 }
 
 function checkAnswer() {
+  if (currentZone === 'revision') { nextQuestion(); return; }
   if (answered) { nextQuestion(); return; }
 
   const e = queue[qIndex];
@@ -2163,6 +2174,13 @@ function showCompleted() {
   document.getElementById('completed-title').textContent = '¡Ronda completada!';
   document.getElementById('btn-restart').textContent = 'Volver a empezar';
   document.getElementById('completed-sub').textContent = `${sessionOk} acertadas · ${sessionFail} falladas de ${queue.length} calles`;
+  if (currentZone === 'revision') {
+    const remaining = getFilteredEntries('revision').length;
+    document.getElementById('completed-title').textContent = '¡Revisión recorrida!';
+    document.getElementById('completed-sub').textContent = remaining ? `Quedan ${remaining} calles sin guardar o eliminar.` : 'Todas las calles pendientes han sido tratadas.';
+    document.getElementById('btn-restart').textContent = 'Ver pendientes';
+    return;
+  }
   if (activeRound && activeRound.key === roundScopeKey()) {
     activeRound = reconcileRound(getFilteredEntries(currentZone), activeRound.key);
     const unseen = activeRound.order.filter(id => !activeRound.seen.includes(id));
@@ -2208,6 +2226,7 @@ function computeMastery(zone) {
 }
 
 function renderMastery() {
+  document.getElementById('count-revision').textContent = `(${getFilteredEntries('revision').length})`;
   const g = computeMastery('todas');
   document.getElementById('mastery-global-pct').textContent = g.pct + '%';
   document.getElementById('mastery-global-count').textContent = `(${g.learned}/${g.total})`;
@@ -2316,7 +2335,8 @@ function openModifyPanel() {
   grupoSelect.value = e.grupo || '';
   document.getElementById('mod-calle').value = e.calle;
   document.getElementById('mod-calle').style.borderColor = '';
-  renderModifyAnswers(e.salidas);
+  const source = SOURCE_ROWS[e.sourceIndex];
+  renderModifyAnswers(e.salidas.length ? e.salidas : [[quizPark(source?.primaryDb), quizPark(source?.supportDb)]]);
   document.getElementById('btn-mod-revert').style.display = e.modified ? 'inline' : 'none';
   panel.classList.add('open');
   document.getElementById('mod-calle').focus();
@@ -2498,6 +2518,7 @@ function belowScope() {
 }
 
 function renderBelowQuiz() {
+  document.getElementById('below-quiz').style.display = currentZone === 'revision' ? 'none' : '';
   const scope = belowScope();
   const grupo = grupoFiltroActivo();
   const label = grupo ? ' de «' + grupo + '»' : (scope === 'todas' ? '' : ' de ' + capZone(scope));
