@@ -26,13 +26,18 @@ fallos pendientes, salidas alternativas, revisiones confirmadas, eliminaciones,
 historial, ubicaciones y preferencias. El primer acceso fusiona los datos; las
 subidas simultáneas vuelven a leer si la versión ha cambiado.
 
-Las copias técnicas grandes se guardan en IndexedDB, evitando duplicar todo el
-progreso dentro del límite de localStorage. «Exportar» también guarda el estado
+Los datos del quiz y la sesión de esta aplicación se guardan en IndexedDB,
+no en el pequeño localStorage compartido con los demás repositorios del dominio.
+La primera carga copia las claves antiguas de Callejero 3000 en una transacción
+y conserva sus originales intactos. Antes de mostrar «Sincronizado» se espera
+a que termine el guardado local. Si IndexedDB falla, se avisa y no se inicia
+un quiz vacío ni se presenta una sincronización como terminada.
+Las copias técnicas también usan IndexedDB. «Exportar» guarda el estado
 de ambos perfiles, rondas y ajustes (formato 7). Nunca incluye credenciales.
 
 ## Conservación
 
-Las claves históricas de progreso no cambian. Las antiguas claves compartidas
+Las claves históricas de progreso no cambian, solo su almacenamiento. Las antiguas claves compartidas
 de mapas y filtros se copian al nuevo espacio solo cuando no hay valor propio,
 sin borrar el original ni escribir de nuevo sobre Calles Valencia.
 

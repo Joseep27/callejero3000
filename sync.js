@@ -1,11 +1,14 @@
 import { isAppKey, reconcile, sameSnapshot } from './sync-core.mjs';
+// Quiz and legacy migration must be ready before capture or save hooks run.
+await window.quizReady;
+const appStorage = window.appStorage;
 const TABLE = 'callejero3000_sync_state';
 const USER_KEY = 'callejero3000_cloud_user_v1';
 const DIRTY_KEY = 'callejero3000_cloud_dirty_v1';
 let client, session, baseline, running = false, requested = false, timer;
 const el = id => document.getElementById(id);
-const capture = () => ({ version:1, values:Object.fromEntries(Object.keys(localStorage)
-  .filter(isAppKey).map(key => [key, localStorage.getItem(key)])) });
+const capture = () => ({ version:1, values:Object.fromEntries(appStorage.keys()
+  .filter(isAppKey).map(key => [key, appStorage.getItem(key)])) });
 function status(text, error = false) {
   for (const id of ['profile-sync-button', 'header-sync-button']) {
     el(id).textContent = text;
@@ -13,9 +16,9 @@ function status(text, error = false) {
   }
 }
 function message(text) { el('sync-message').textContent = text; }
-function markDirty() { try { localStorage.setItem(DIRTY_KEY, '1'); } catch {} }
+function markDirty() { try { appStorage.setItem(DIRTY_KEY, '1'); } catch {} }
 async function technicalStore(key, value) {
-  // Large technical copies use IndexedDB, never duplicate progress in localStorage.
+  // Technical baselines use their own IndexedDB, never large localStorage copies.
   const db = await new Promise((resolve, reject) => {
     const request = indexedDB.open('callejero3000_cloud_sync_v1', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('baselines');
@@ -39,13 +42,13 @@ function apply(snapshot) {
   const changed = [];
   try {
     for (const [key, raw] of Object.entries(snapshot.values || {})) {
-      if (!isAppKey(key) || typeof raw !== 'string' || localStorage.getItem(key) === raw) continue;
-      changed.push([key, localStorage.getItem(key)]);
-      localStorage.setItem(key, raw);
+      if (!isAppKey(key) || typeof raw !== 'string' || appStorage.getItem(key) === raw) continue;
+      changed.push([key, appStorage.getItem(key)]);
+      appStorage.setItem(key, raw);
     }
   } catch (error) {
     for (const [key, old] of changed.reverse()) {
-      try { if (old === null) localStorage.removeItem(key); else localStorage.setItem(key, old); } catch {}
+      try { if (old === null) appStorage.removeItem(key); else appStorage.setItem(key, old); } catch {}
     }
     throw error;
   }
@@ -67,7 +70,7 @@ async function sync() {
   status('☁ Sincronizando…');
   try {
     const userId = session.user.id;
-    if (localStorage.getItem(USER_KEY) !== userId) {
+    if (appStorage.getItem(USER_KEY) !== userId) {
       baseline = null;
       try { await technicalStore('pre-sync:' + userId, capture()); } catch {}
     } else if (!baseline) {
@@ -90,12 +93,14 @@ async function sync() {
       // Include edits made while the network request was in flight.
       const newest = reconcile(merged, capture(), localAtMerge);
       apply(newest);
+      await appStorage.flush();
       baseline = merged;
       try { await technicalStore(userId, merged); } catch {}
-      localStorage.setItem(USER_KEY, userId);
+      appStorage.setItem(USER_KEY, userId);
       const pending = !sameSnapshot(capture(), merged);
       if (pending) { markDirty(); requested = true; }
-      else localStorage.removeItem(DIRTY_KEY);
+      else appStorage.removeItem(DIRTY_KEY);
+      await appStorage.flush();
       status(pending ? '☁ Guardando cambios…' : '☁ Sincronizado');
       message('Datos de Callejero 3000 sincronizados. Tu copia local se conserva.');
       settled = true;
@@ -144,7 +149,7 @@ el('sync-sign-in').addEventListener('click', async () => {
 el('sync-now').addEventListener('click', sync);
 el('sync-sign-out').addEventListener('click', async () => {
   if (!client) return;
-  if (localStorage.getItem(DIRTY_KEY) && session?.user) await sync();
+  if (appStorage.getItem(DIRTY_KEY) && session?.user) await sync();
   const result = await client.auth.signOut({ scope:'local' });
   if (result.error) { message(result.error.message); return; }
   session = null; baseline = null; authUI();
@@ -152,8 +157,10 @@ el('sync-sign-out').addEventListener('click', async () => {
 });
 window.addEventListener('online', sync);
 window.addEventListener('storage', event => { if (event.key && isAppKey(event.key)) sync(); });
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' || localStorage.getItem(DIRTY_KEY)) sync();
+window.addEventListener('app-storage-change', sync);
+document.addEventListener('visibilitychange', async () => {
+  try { if (document.visibilityState === 'visible') await appStorage.reload(); } catch { return; }
+  if (document.visibilityState === 'visible' || appStorage.getItem(DIRTY_KEY)) sync();
 });
 // Poll while visible to receive changes from the mobile without a manual reload.
 setInterval(() => { if (document.visibilityState === 'visible') sync(); }, 30000);
@@ -161,7 +168,7 @@ try {
   const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
   client = createClient('https://mbmxfyslftdeobecbske.supabase.co',
     'sb_publishable_wMp1B0NTMZJQ89sr6-Xkhg_CBvkeX7j',
-    { auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true} });
+    { auth:{storage:appStorage.auth,persistSession:true,autoRefreshToken:true,detectSessionInUrl:true} });
   const result = await client.auth.getSession();
   if (result.error) throw result.error;
   session = result.data.session; authUI();

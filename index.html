@@ -1047,7 +1047,8 @@
 
 </main>
 
-<script>
+<div id="storage-notice" role="alert" hidden style="position:fixed;top:0;left:0;right:0;z-index:10000;padding:12px;background:#442b00;color:#fff;text-align:center"></div>
+<script type="text/plain" id="quiz-source">
 // ============================================================
 // DATOS
 // ============================================================
@@ -1189,12 +1190,12 @@ const OVR_KEY  = 'quiz_valencia_2500_v1_OVERRIDES';
 const HIST_KEY = 'quiz_valencia_2500_v1_HISTORIAL';
 const DELETED_KEY = 'quiz_valencia_2500_v1_DELETED';
 
-function loadOverrides() { try { return JSON.parse(localStorage.getItem(OVR_KEY)) || {}; } catch { return {}; } }
-function saveOverrides(o) { try { localStorage.setItem(OVR_KEY, JSON.stringify(o)); } catch {} }
-function loadHist() { try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; } catch { return []; } }
-function saveHist(h) { try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch {} }
-function loadDeleted() { try { return JSON.parse(localStorage.getItem(DELETED_KEY)) || {}; } catch { return {}; } }
-function saveDeleted(d) { try { localStorage.setItem(DELETED_KEY, JSON.stringify(d)); } catch {} }
+function loadOverrides() { try { return JSON.parse(appStorage.getItem(OVR_KEY)) || {}; } catch { return {}; } }
+function saveOverrides(o) { try { appStorage.setItem(OVR_KEY, JSON.stringify(o)); } catch {} }
+function loadHist() { try { return JSON.parse(appStorage.getItem(HIST_KEY)) || []; } catch { return []; } }
+function saveHist(h) { try { appStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch {} }
+function loadDeleted() { try { return JSON.parse(appStorage.getItem(DELETED_KEY)) || {}; } catch { return {}; } }
+function saveDeleted(d) { try { appStorage.setItem(DELETED_KEY, JSON.stringify(d)); } catch {} }
 
 let OVERRIDES = loadOverrides();
 let DELETED = loadDeleted();
@@ -1285,15 +1286,15 @@ function expandCalle(c) {
 
 function loadGeo() {
   try {
-    let raw = localStorage.getItem(GEO_KEY);
+    let raw = appStorage.getItem(GEO_KEY);
     if (!raw) {
-      raw = localStorage.getItem('quiz_calles_vlc_v2_GEO');
-      if (raw) { try { localStorage.setItem(GEO_KEY, raw); } catch {} }
+      raw = appStorage.getItem('quiz_calles_vlc_v2_GEO');
+      if (raw) { try { appStorage.setItem(GEO_KEY, raw); } catch {} }
     }
     return JSON.parse(raw) || {};
   } catch { return {}; }
 }
-function saveGeo(g) { try { localStorage.setItem(GEO_KEY, JSON.stringify(g)); } catch {} }
+function saveGeo(g) { try { appStorage.setItem(GEO_KEY, JSON.stringify(g)); } catch {} }
 
 // Caja aproximada del área de Valencia (para no coger calles de otras ciudades)
 const VLC_BOX = { minLon: -0.50, maxLat: 39.58, maxLon: -0.25, minLat: 39.36 };
@@ -1497,11 +1498,11 @@ function getLSKey() { return LS_KEY_PREFIX + CURRENT_USER; }
 
 function loadStorage() {
   try {
-    return JSON.parse(localStorage.getItem(getLSKey())) || {};
+    return JSON.parse(appStorage.getItem(getLSKey())) || {};
   } catch { return {}; }
 }
 function saveStorage(data) {
-  try { localStorage.setItem(getLSKey(), JSON.stringify(data)); } catch {}
+  try { appStorage.setItem(getLSKey(), JSON.stringify(data)); } catch {}
 }
 
 // Reinicio de Repaso solicitado para esta actualización, una vez por perfil.
@@ -1509,14 +1510,14 @@ function saveStorage(data) {
 function resetLegacyReviewOnce() {
   const resetKey = LS_KEY_PREFIX + 'REVIEW_RESET_20261011_' + CURRENT_USER;
   try {
-    if (localStorage.getItem(resetKey) === 'done') return;
+    if (appStorage.getItem(resetKey) === 'done') return;
     for (const rec of Object.values(store)) {
       if (!rec || typeof rec !== 'object' || Array.isArray(rec)) continue;
       rec.pendingFail = false;
       delete rec.pendingFailEntry;
     }
-    localStorage.setItem(getLSKey(), JSON.stringify(store));
-    localStorage.setItem(resetKey, 'done');
+    appStorage.setItem(getLSKey(), JSON.stringify(store));
+    appStorage.setItem(resetKey, 'done');
   } catch {
     alert('No se ha podido guardar el reinicio de Repaso en este navegador. No borres tus datos: exporta una copia antes de liberar espacio.');
   }
@@ -1606,7 +1607,7 @@ let answerMode = 'buttons';
 function answerModeKey() { return 'quiz_valencia_2500_v1_ANSWER_MODE_' + CURRENT_USER; }
 function setAnswerMode(mode) {
   answerMode = mode === 'text' ? 'text' : 'buttons';
-  try { localStorage.setItem(answerModeKey(), answerMode); } catch {}
+  try { appStorage.setItem(answerModeKey(), answerMode); } catch {}
 }
 function updateAnswerModeUI() {
   document.querySelectorAll('.parque-options').forEach(group => { group.style.display = answerMode === 'buttons' ? '' : 'none'; });
@@ -1634,8 +1635,8 @@ function addDaysISO(iso, days) {
   const p = n => String(n).padStart(2, '0');
   return `${x.getFullYear()}-${p(x.getMonth()+1)}-${p(x.getDate())}`;
 }
-function loadPlan() { try { return JSON.parse(localStorage.getItem(planKey())) || {}; } catch { return {}; } }
-function savePlan(plan) { try { localStorage.setItem(planKey(), JSON.stringify(plan)); } catch {} }
+function loadPlan() { try { return JSON.parse(appStorage.getItem(planKey())) || {}; } catch { return {}; } }
+function savePlan(plan) { try { appStorage.setItem(planKey(), JSON.stringify(plan)); } catch {} }
 function escPlan(v) { return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function planOffset(stage) {
   return stage < PLAN_INTERVALS.length ? PLAN_INTERVALS[stage] : 10 + (stage - 3) * 10;
@@ -1655,7 +1656,7 @@ function scheduleTheme(grupo, startedOn = todayISO()) {
 // copia recuperable y las fechas de los temas realmente completados.
 function bootstrapExistingThemes() {
   const migrationKey = planKey() + '_FULL_ROUND_V1';
-  if (localStorage.getItem(migrationKey)) return;
+  if (appStorage.getItem(migrationKey)) return;
   const plan = loadPlan();
   const confirmed = CURRENT_USER === 'Josep' ? ['Puentes', 'Países / Regiones'] : [];
   // Estas dos vueltas han sido confirmadas expresamente por el usuario.
@@ -1673,9 +1674,9 @@ function bootstrapExistingThemes() {
     }
   });
   try {
-    localStorage.setItem(migrationKey + '_BACKUP', JSON.stringify(plan));
-    localStorage.setItem(planKey(), JSON.stringify(corrected));
-    localStorage.setItem(migrationKey, todayISO());
+    appStorage.setItem(migrationKey + '_BACKUP', JSON.stringify(plan));
+    appStorage.setItem(planKey(), JSON.stringify(corrected));
+    appStorage.setItem(migrationKey, todayISO());
   } catch { console.warn('No se ha podido corregir el plan; se conserva su copia anterior.'); }
 }
 
@@ -1748,16 +1749,16 @@ function startPlanReview(grupo) {
 function loadGrupoSel(zone) {
   const key = 'quiz_valencia_2500_v1_GRUPOSEL_' + (CURRENT_USER || 'shared') + '_' + zone;
   try {
-    let raw = localStorage.getItem(key);
+    let raw = appStorage.getItem(key);
     if (!raw) {
-      raw = localStorage.getItem('grupoSel_' + zone);
-      if (raw) { try { localStorage.setItem(key, raw); } catch {} }
+      raw = appStorage.getItem('grupoSel_' + zone);
+      if (raw) { try { appStorage.setItem(key, raw); } catch {} }
     }
     return raw || 'todas';
   } catch { return 'todas'; }
 }
 function saveGrupoSel(zone, grupo) {
-  try { localStorage.setItem('quiz_valencia_2500_v1_GRUPOSEL_' + (CURRENT_USER || 'shared') + '_' + zone, grupo); } catch {}
+  try { appStorage.setItem('quiz_valencia_2500_v1_GRUPOSEL_' + (CURRENT_USER || 'shared') + '_' + zone, grupo); } catch {}
 }
 function getGrupoSel(zone) { return loadGrupoSel(zone); }
 function setGrupoSel(zone, grupo) { saveGrupoSel(zone, grupo); }
@@ -1849,12 +1850,12 @@ function roundScopeKey() {
 }
 function roundStreetId(entry) { return entry.origCalle || entry.calle; }
 function saveRound(state) {
-  try { localStorage.setItem(state.key, JSON.stringify(state)); }
+  try { appStorage.setItem(state.key, JSON.stringify(state)); }
   catch { console.warn('No se ha podido guardar la ronda de estudio.'); }
 }
 function reconcileRound(entries, key) {
   let saved;
-  try { saved = JSON.parse(localStorage.getItem(key)); } catch {}
+  try { saved = JSON.parse(appStorage.getItem(key)); } catch {}
   const available = new Set(entries.map(roundStreetId));
   const order = [], included = new Set();
   for (const id of (Array.isArray(saved?.order) ? saved.order : [])) {
@@ -2668,8 +2669,8 @@ function exportData() {
     overrides: loadOverrides(),
     deleted: loadDeleted(),
     historial: loadHist(),
-    localState: {version:1,values:Object.fromEntries(Object.keys(localStorage)
-      .filter(key => key.startsWith('quiz_valencia_2500_v1_')).map(key => [key,localStorage.getItem(key)]))},
+    localState: {version:1,values:Object.fromEntries(appStorage.keys()
+      .filter(key => key.startsWith('quiz_valencia_2500_v1_')).map(key => [key,appStorage.getItem(key)]))},
     exportedBy: CURRENT_USER,
     at: Date.now()
   };
@@ -3102,7 +3103,7 @@ function enterApp(user) {
   CURRENT_USER = user;
   store = loadStorage();
   resetLegacyReviewOnce();
-  try { answerMode = localStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }
+  try { answerMode = appStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }
   document.getElementById('quiz-area').style.display = 'block';
   document.getElementById('stats-area').style.display = 'none';
   document.getElementById('historial-area').style.display = 'none';
@@ -3155,6 +3156,7 @@ document.getElementById('switch-user-btn').addEventListener('click', () => {
     <div class="sync-message" id="sync-message" aria-live="polite"></div>
   </div>
 </div>
+<script src="./storage.js"></script>
 <script type="module" src="./sync.js"></script>
 <script>
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
