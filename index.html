@@ -840,7 +840,6 @@
   <div class="tab" data-zone="campanar">Campanar<span class="tab-pct" id="pct-campanar"></span></div>
   <div class="tab" data-zone="saler">Saler<span class="tab-pct" id="pct-saler"></span></div>
   <div class="tab" data-zone="repaso">★ Repaso</div>
-  <div class="tab" data-zone="revision">⚠ Pendientes de revisar <span id="count-revision"></span></div>
   <div class="tab" data-zone="plan" id="tab-plan" style="display:none;">🗓 Plan</div>
   <div class="tab" data-zone="stats">📊 Stats</div>
   <div class="tab" data-zone="historial">📝 Historial</div>
@@ -1603,6 +1602,7 @@ let onlyFailed = false;
 let queue = [];
 let activeRound = null;
 let activePlanReviewGroup = null;
+let completedPlanReview = null;
 let answerMode = 'buttons';
 function answerModeKey() { return 'quiz_valencia_2500_v1_ANSWER_MODE_' + CURRENT_USER; }
 function setAnswerMode(mode) {
@@ -1645,8 +1645,10 @@ function planDue(startedOn, stage) { return addDaysISO(startedOn, planOffset(sta
 function scheduleTheme(grupo, startedOn = todayISO()) {
   if (!grupo || grupo === 'todas') return;
   const plan = loadPlan();
-  if (!plan[grupo]) {
-    plan[grupo] = { startedOn, stage: 0, due: planDue(startedOn, 0), done: false, completedRound: true };
+  if (!plan[grupo] || plan[grupo].resetPending) {
+    const resetAt = plan[grupo]?.resetAt;
+    plan[grupo] = { startedOn, stage: 0, due: planDue(startedOn, 0), done: false, completedRound: true,
+      ...(resetAt ? { resetAt, resetPending: false } : {}) };
     savePlan(plan);
   }
   renderStudyPlan();
@@ -1658,17 +1660,18 @@ function bootstrapExistingThemes() {
   const migrationKey = planKey() + '_FULL_ROUND_V1';
   if (appStorage.getItem(migrationKey)) return;
   const plan = loadPlan();
-  const confirmed = CURRENT_USER === 'Josep' ? ['Puentes', 'Países / Regiones'] : [];
-  // Estas dos vueltas han sido confirmadas expresamente por el usuario.
+  const confirmed = CURRENT_USER === 'Josep' ? ['Países / Regiones'] : [];
+  // Mantener los temas confirmados y respetar los reinicios expresos del Plan.
   const corrected = {};
   GRUPOS.forEach(g => {
+    if (plan[g]?.resetPending) { corrected[g] = plan[g]; return; }
     const streets = uniqueStreetEntries(studyEntries().filter(e => e.grupo === g));
     const completed = streets.length > 0 && streets.every(e => {
       const r = store[recordStreetKey(e.calle)];
       const x = r && r.porGrupo && r.porGrupo[g];
       return x && ((x.ok || 0) + (x.fail || 0) > 0);
     });
-    if (completed || plan[g]?.completedRound || confirmed.includes(g)) {
+    if ((completed && plan[g]) || plan[g]?.completedRound || confirmed.includes(g)) {
       const t = todayISO();
       corrected[g] = { ...(plan[g] || { startedOn:t, stage:0, due:planDue(t, 0), done:false }), completedRound:true };
     }
@@ -1682,7 +1685,7 @@ function bootstrapExistingThemes() {
 
 function finishPlanReview(grupo) {
   const plan = loadPlan(); const item = plan[grupo];
-  if (!item) return;
+  if (!item || item.resetPending || item.done) return false;
   item.stage++;
   item.lastDone = todayISO();
   // Si había varios repasos atrasados, una sesión pone el calendario al día:
@@ -1691,6 +1694,7 @@ function finishPlanReview(grupo) {
   item.done = false;
   item.due = planDue(item.startedOn, item.stage);
   savePlan(plan);
+  return true;
 }
 
 function postponeTheme(grupo) {
@@ -1732,8 +1736,9 @@ function renderStudyPlan() {
 }
 
 function startPlanReview(grupo) {
-  activePlanReviewGroup = grupo;
+  setGrupoSel('todas', grupo);
   onlyFailed = false;
+  updateZoneFilterUI('todas');
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.zone === 'todas'));
   document.getElementById('quiz-area').style.display = 'block';
   document.getElementById('study-plan').style.display = 'none';
@@ -1790,7 +1795,7 @@ function updateGrupoWarning(zone) {
 
 function updateGrupoFilterUI(zone) {
   const wrap = document.getElementById('grupo-filter');
-  const show = !activePlanReviewGroup && ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
+  const show = ['todas', 'repaso', 'norte', 'central', 'campanar', 'oeste', 'saler'].includes(zone);
   wrap.classList.toggle('show', show);
   if (show) populateGrupoSelect(zone);
   updateGrupoWarning(zone);
@@ -1871,10 +1876,34 @@ function reconcileRound(entries, key) {
   saveRound(state);
   return state;
 }
+function isRoundComplete(state) {
+  return !!state?.order.length && state.order.every(id => state.seen.includes(id)) && !state.retry.length;
+}
+
+// Guardar el calendario al comprobar la última respuesta, sin exigir Siguiente.
+// La etapa forma parte de la clave: una vuelta ya registrada no puede avanzarla otra vez.
+function registerCompletedRound() {
+  if (CURRENT_USER !== 'Josep' || currentZone !== 'todas' || !isRoundComplete(activeRound) || activeRound.key !== roundScopeKey()) return;
+  if (activePlanReviewGroup) {
+    const grupo = activePlanReviewGroup;
+    if (finishPlanReview(grupo)) {
+      completedPlanReview = { grupo, key: activeRound.key, due: loadPlan()[grupo].due };
+      renderStudyPlan();
+      document.getElementById('plan-review-badge').textContent = `✅ Repaso registrado · ${grupo} · Próximo: ${completedPlanReview.due.split('-').reverse().join('/')}`;
+    }
+  } else {
+    const grupo = grupoFiltroActivo();
+    if (grupo) scheduleTheme(grupo);
+  }
+}
+
 function persistentRoundEntries(entries, key) {
   const byId = new Map(entries.map(e => [roundStreetId(e), e]));
   activeRound = reconcileRound(entries, key);
-  if (activeRound.order.length && activeRound.seen.length === activeRound.order.length && !activeRound.retry.length) {
+  if (isRoundComplete(activeRound)) {
+    // Recupera también vueltas terminadas antes de esta corrección o de cerrar la página.
+    registerCompletedRound();
+    if (activePlanReviewGroup) return [];
     activeRound.cycle++;
     activeRound.seen = [];
     activeRound.order = shuffle([...byId.keys()]);
@@ -1918,10 +1947,15 @@ function updateRetryQueue(entry, correct) {
 
 function startQuiz(zone) {
   currentZone = zone;
+  completedPlanReview = null;
+  const grupo = getGrupoSel(zone);
+  const planned = CURRENT_USER === 'Josep' && zone === 'todas' && !onlyFailed && grupo !== 'todas' && grupo !== '__sin_asignar__' ? loadPlan()[grupo] : null;
+  activePlanReviewGroup = planned && !planned.done && planned.due <= todayISO() ? grupo : null;
   updateGrupoFilterUI(zone);
   renderBelowQuiz();
   renderMastery();
   document.getElementById('plan-review-badge').classList.toggle('show', !!activePlanReviewGroup);
+  document.getElementById('plan-review-badge').textContent = activePlanReviewGroup ? `🗓 Repaso programado de hoy · ${activePlanReviewGroup}` : '';
   const entries = getFilteredEntries(zone);
   const roundKey = roundScopeKey();
   activeRound = null;
@@ -2006,7 +2040,7 @@ function renderQuestion() {
   const grupoEl = document.getElementById('calle-grupo');
   const translation = e.translation && e.translation !== e.calle ? e.translation : '';
   const details = [];
-  if (e.grupo && !activePlanReviewGroup) details.push(`Temática: ${e.grupo}`);
+  if (e.grupo) details.push(`Temática: ${e.grupo}`);
   else if (!e.grupo) details.push('⚠ Sin temática: revisa el mapa y usa “Modificar”');
   if (e.incomplete) details.push('⚠ Faltan parques');
   const parkReviewProposal = PARK_REVIEW_PROPOSALS[normalizeStreet(e.official)];
@@ -2195,6 +2229,7 @@ function checkAnswer() {
   updateHeaderStats();
   renderMastery();
   updateAnswerModeUI();
+  registerCompletedRound();
 }
 
 function showFeedback(ok, e) {
@@ -2264,7 +2299,7 @@ function showCompleted() {
     document.getElementById('btn-restart').textContent = 'Ver pendientes';
     return;
   }
-  if (activeRound && activeRound.key === roundScopeKey()) {
+  if (activeRound) {
     activeRound = reconcileRound(getFilteredEntries(currentZone), activeRound.key);
     const unseen = activeRound.order.filter(id => !activeRound.seen.includes(id));
     const remaining = new Set([...unseen, ...activeRound.retry]).size;
@@ -2274,18 +2309,15 @@ function showCompleted() {
       document.getElementById('btn-restart').textContent = 'Continuar pendientes';
       return;
     }
-    fullRoundCompleted = activeRound.order.length > 0;
+    fullRoundCompleted = isRoundComplete(activeRound);
   }
+  registerCompletedRound();
   activeRound = null;
-  if (activePlanReviewGroup && fullRoundCompleted) {
-    finishPlanReview(activePlanReviewGroup);
+  if (completedPlanReview && fullRoundCompleted) {
     document.getElementById('completed-sub').textContent += ' · Repaso registrado';
-    activePlanReviewGroup = null;
-    renderStudyPlan();
-  } else {
-    const grupo = grupoFiltroActivo();
-    if (fullRoundCompleted && CURRENT_USER === 'Josep' && currentZone === 'todas' && grupo && grupo !== '__sin_asignar__') scheduleTheme(grupo);
   }
+  activePlanReviewGroup = null;
+  document.getElementById('plan-review-badge').classList.remove('show');
 }
 
 function updateHeaderStats() {
@@ -2309,7 +2341,6 @@ function computeMastery(zone) {
 }
 
 function renderMastery() {
-  document.getElementById('count-revision').textContent = `(${getFilteredEntries('revision').length})`;
   const g = computeMastery('todas');
   document.getElementById('mastery-global-pct').textContent = g.pct + '%';
   document.getElementById('mastery-global-count').textContent = `(${g.learned}/${g.total})`;
@@ -2655,8 +2686,8 @@ function exportData() {
       nota_usuario: rec.nota || '',
       primera_revision: rec.firstSeen || '',
       ultima_revision: rec.lastSeen || '',
-      nivel_plan: plan[e.grupo]?.stage ?? '',
-      proximo_repaso: plan[e.grupo]?.due || '',
+      nivel_plan: plan[e.grupo]?.done ? '' : plan[e.grupo]?.stage ?? '',
+      proximo_repaso: plan[e.grupo]?.done ? '' : plan[e.grupo]?.due || '',
       modificada: !!e.modified
     };
   });
@@ -3101,6 +3132,8 @@ function refreshCloudState() {
 // ============================================================
 function enterApp(user) {
   CURRENT_USER = user;
+  activePlanReviewGroup = null;
+  completedPlanReview = null;
   store = loadStorage();
   resetLegacyReviewOnce();
   try { answerMode = appStorage.getItem(answerModeKey()) === 'text' ? 'text' : 'buttons'; } catch { answerMode = 'buttons'; }

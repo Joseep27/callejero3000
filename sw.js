@@ -1,4 +1,4 @@
-const CACHE_NAME = 'callejero3000-v2';
+const CACHE_NAME = 'callejero3000-v3';
 const SHELL = ['./','./index.html','./storage.js','./sync.js','./sync-core.mjs','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png','./icon-180.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(async cache => {

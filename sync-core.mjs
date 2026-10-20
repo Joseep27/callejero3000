@@ -73,6 +73,11 @@ export function mergeConflict(key, remoteRaw, localRaw, baseRaw) {
     return JSON.stringify(mergeMap(r, l, b, mergeRecord));
   if (key.startsWith(PREFIX + 'ROUND_')) return JSON.stringify(mergeRound(r, l, b));
   if (/^quiz_valencia_2500_v1_PLAN_(Josep|Tudón)$/.test(key)) return JSON.stringify(mergeMap(r, l, b, (r, l) => {
+    // Un reinicio explícito sustituye al calendario anterior, aunque su etapa
+    // sea mayor. Al volver a estudiar el tema se consume sin perder su generación.
+    const remoteReset = r.resetAt || '', localReset = l.resetAt || '';
+    if (remoteReset !== localReset) return remoteReset > localReset ? r : l;
+    if (remoteReset && !!r.resetPending !== !!l.resetPending) return r.resetPending ? l : r;
     let winner = (r.stage || 0) !== (l.stage || 0) ? ((r.stage || 0) > (l.stage || 0) ? r : l) : newer(r, l);
     if ((r.stage || 0) === (l.stage || 0)) {
       const rt = r.postponedOn || r.lastDone || '', lt = l.postponedOn || l.lastDone || '';
