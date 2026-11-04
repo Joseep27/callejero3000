@@ -1604,12 +1604,49 @@ let activeRound = null;
 let activePlanReviewGroup = null;
 let completedPlanReview = null;
 let answerMode = 'buttons';
+const ZONE_SUPPORT_OPTIONS = {
+  norte: ['Central', 'Campanar'],
+  central: ['Oeste', 'Norte'],
+  oeste: ['Central', 'Campanar'],
+  campanar: ['Oeste', 'Norte'],
+  saler: ['Central']
+};
+function zoneSeenKey() { return 'quiz_valencia_2500_v1_ZONE_SEEN_' + CURRENT_USER; }
+function loadZoneSeen() {
+  try { return JSON.parse(appStorage.getItem(zoneSeenKey())) || {}; } catch { return {}; }
+}
+function markZoneSeen(entry) {
+  if (!ZONE_SUPPORT_OPTIONS[currentZone]) return;
+  const seen = loadZoneSeen();
+  seen[JSON.stringify([currentZone, roundStreetId(entry)])] = new Date().toISOString();
+  appStorage.setItem(zoneSeenKey(), JSON.stringify(seen));
+}
+function zoneProgress(zone) {
+  const entries = uniqueStreetEntries(entriesForPark(studyEntries(), capZone(zone)));
+  const seen = loadZoneSeen();
+  const ids = new Set(entries.filter(e => seen[JSON.stringify([zone, roundStreetId(e)])]).map(roundStreetId));
+  // Recupera el trabajo ya registrado en las rondas de esta zona.
+  const prefix = 'quiz_valencia_2500_v1_ROUND_' + CURRENT_USER + '_';
+  appStorage.keys().filter(key => key.startsWith(prefix)).forEach(key => {
+    try {
+      if (JSON.parse(key.slice(prefix.length))[0] !== zone) return;
+      (JSON.parse(appStorage.getItem(key))?.seen || []).forEach(id => ids.add(id));
+    } catch {}
+  });
+  const done = entries.filter(e => ids.has(roundStreetId(e))).length;
+  return { done, total: entries.length, remaining: entries.length - done };
+}
 function answerModeKey() { return 'quiz_valencia_2500_v1_ANSWER_MODE_' + CURRENT_USER; }
 function setAnswerMode(mode) {
   answerMode = mode === 'text' ? 'text' : 'buttons';
   try { appStorage.setItem(answerModeKey(), answerMode); } catch {}
 }
 function updateAnswerModeUI() {
+  const support = ZONE_SUPPORT_OPTIONS[currentZone];
+  document.querySelectorAll('.parque-options[data-target="sel-apoyo"] .parque-option').forEach(button => {
+    button.hidden = !!support && !support.includes(button.dataset.parque);
+    button.style.display = button.hidden ? 'none' : '';
+  });
   document.querySelectorAll('.parque-options').forEach(group => { group.style.display = answerMode === 'buttons' ? '' : 'none'; });
   ['sel-primero','sel-apoyo'].forEach(id => { document.getElementById(id).style.display = answerMode === 'text' ? '' : 'none'; });
   document.querySelectorAll('[data-answer-mode]').forEach(button => {
@@ -2112,7 +2149,7 @@ function renderQuestion() {
   const reviewing = currentZone === 'revision';
   row.style.display = reviewing ? 'none' : '';
   document.getElementById('answer-mode-switch').style.display = reviewing ? 'none' : '';
-  document.getElementById('btn-aprendida').style.display = reviewing ? 'none' : '';
+  document.getElementById('btn-aprendida').style.display = currentZone === 'todas' ? '' : 'none';
 
   // Progress
   updateQuestionProgress();
@@ -2179,6 +2216,7 @@ function checkAnswer() {
     rec.firstSeen = checkedAt;
   }
   rec.lastSeen = checkedAt;
+  markZoneSeen(e);
 
   // Save nota on answer
   rec.nota = document.getElementById('nota-textarea').value;
@@ -2186,15 +2224,17 @@ function checkAnswer() {
 
   if (correct) {
     rec.ok++;
-    rec.streak = (rec.streak || 0) + 1;
+    if (currentZone === 'todas') rec.streak = (rec.streak || 0) + 1;
     if (currentZone === 'repaso') rec.pendingFail = false;
     sessionOk++;
     showFeedback(true, e);
   } else {
     rec.fail++;
-    rec.streak = 0;
-    rec.aprendida = false;
-    rec.manual = false;
+    if (currentZone === 'todas') {
+      rec.streak = 0;
+      rec.aprendida = false;
+      rec.manual = false;
+    }
     rec.pendingFail = true;
     rec.pendingFailEntry = ovKey(e);
     sessionFail++;
@@ -2210,9 +2250,8 @@ function checkAnswer() {
     if (correct) rec.porGrupo[grupoActivo].ok++; else rec.porGrupo[grupoActivo].fail++;
   }
 
-  // Igual que callesvalencia: los aciertos de Repaso suman para el check.
-  // Un fallo siempre desmarca aprendida y reinicia la racha.
-  if (correct && !rec.manual) {
+  // La racha y el estado Aprendida solo cambian al estudiar en Todas.
+  if (currentZone === 'todas' && correct && !rec.manual) {
     rec.aprendida = rec.streak >= 5;
   }
 
@@ -2349,7 +2388,13 @@ function renderMastery() {
   ['todas', 'norte', 'central', 'oeste', 'campanar', 'saler'].forEach(z => {
     const m = computeMastery(z);
     const el = document.getElementById('pct-' + z);
-    if (el) el.textContent = ` ${m.pct}%`;
+    if (el) {
+      if (ZONE_SUPPORT_OPTIONS[z]) {
+        const p = zoneProgress(z);
+        el.textContent = ` ${p.done}/${p.total} · faltan ${p.remaining}`;
+        el.title = 'Calles distintas respondidas en esta zona';
+      } else el.textContent = ` ${m.pct}%`;
+    }
   });
 }
 
@@ -3197,3 +3242,4 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
 </div><!-- #app -->
 </body>
 </html>
+
